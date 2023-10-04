@@ -27,30 +27,123 @@ import typing as tp
 import numpy as np
 
 from audiocraft.models import MusicGen
+from audiocraft.models.musicgen import _HF_MODEL_CHECKPOINTS_MAP as HF_MODEL_CHECKPOINTS_MAP
 from audiocraft.models.loaders import (
     load_compression_model,
     load_lm_model,
-    HF_MODEL_CHECKPOINTS_MAP,
 )
 from audiocraft.data.audio import audio_write
 
+from audiocraft.models.builders import get_lm_model, get_compression_model, get_wrapped_compression_model
+from omegaconf import OmegaConf
+
+from tensorizer import TensorDeserializer
+from tensorizer.utils import no_init_or_tensor
+import re
+import time
+import subprocess
+import logging
+
+def _delete_param(cfg, full_name: str):
+    parts = full_name.split('.')
+    for part in parts[:-1]:
+        if part in cfg:
+            cfg = cfg[part]
+        else:
+            return
+    OmegaConf.set_struct(cfg, False)
+    if parts[-1] in cfg:
+        del cfg[parts[-1]]
+    OmegaConf.set_struct(cfg, True)
+
+def load_ckpt(path, device):
+    loaded = torch.load(path)
+    cfg = OmegaConf.create(loaded['xp.cfg'])
+    cfg.device = str(device)
+    if cfg.device == 'cpu':
+        cfg.dtype = 'float32'
+    else:
+        cfg.dtype = 'float16'
+    _delete_param(cfg, 'conditioners.self_wav.chroma_chord.cache_path')
+    _delete_param(cfg, 'conditioners.self_wav.chroma_stem.cache_path')
+    _delete_param(cfg, 'conditioners.args.merge_text_conditions_p')
+    _delete_param(cfg, 'conditioners.args.drop_desc_p')
+
+    lm = get_lm_model(loaded['xp.cfg'])
+    lm.load_state_dict(loaded['best_state']['model']) 
+    lm.eval()
+    lm.cfg = cfg
+    compression_model = CompressionSolver.wrapped_model_from_checkpoint(cfg, cfg.compression_model_checkpoint, device=device)
+    return MusicGen(f"{os.getenv('COG_USERNAME')}/musicgen-finetuned", compression_model, lm)
 
 class Predictor(BasePredictor):
-    def setup(self):
+    def setup(self, weights: Optional[Path] = None, model_version: Optional[str] = None):
         """Load the model into memory to make running multiple predictions efficient"""
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        self.melody_model = self._load_model(
+        if str(weights) == "weights":
+            weights = None
+        
+        # self.melody_model = self._load_model(
+        #     model_path=MODEL_PATH,
+        #     cls=MusicGen,
+        #     model_id="facebook/musicgen-melody",
+        # )
+
+        # self.large_model = self._load_model(
+        #     model_path=MODEL_PATH,
+        #     cls=MusicGen,
+        #     model_id="facebook/musicgen-large",
+        # )
+
+        # self.medium_model = self._load_model(
+        #     model_path=MODEL_PATH,
+        #     cls=MusicGen,
+        #     model_id="facebook/musicgen-medium",
+        # )
+
+        print(model_version)
+
+        self.small_model = self._load_model(
             model_path=MODEL_PATH,
             cls=MusicGen,
-            model_id="facebook/musicgen-melody",
+            model_id="facebook/musicgen-small",
         )
 
-        self.large_model = self._load_model(
-            model_path=MODEL_PATH,
-            cls=MusicGen,
-            model_id="facebook/musicgen-large",
+        if weights is not None:
+            # self.my_model = MusicGen.get_pretrained(weights)
+            self.my_model = self.load_tensorizer(weights, model_version)
+            # self.my_model = load_ckpt(weights["weights"], self.device)
+
+    def load_tensorizer(self, weights, model_version):
+        # st = time.time()
+        # weights = str(weights)
+        # print("loadin")
+        # print(weights)
+        # pattern = r"https://pbxt\.replicate\.delivery/([^/]+/[^/]+)"
+        # match = re.search(pattern, weights)
+        # if match:
+        #     weights = f"gs://replicate-files/{match.group(1)}"
+
+        # print(f"deserializing weights")
+        # local_weights = "/src/musicgen_tensors"
+        # command = f"/gc/google-cloud-sdk/bin/gcloud storage cp {weights} {local_weights}".split()
+        # res = subprocess.run(command)
+        # if res.returncode != 0:
+        #     raise Exception(
+        #         f"gcloud storage cp command failed with return code {res.returncode}: {res.stderr.decode('utf-8')}"
+        #     )
+
+        logging.disable(logging.WARN)
+        model = no_init_or_tensor(
+            lambda: MusicGen.get_pretrained(f'facebook/musicgen-{model_version}')
         )
+        logging.disable(logging.NOTSET)
+
+        des = TensorDeserializer(weights, plaid_mode=True)
+        des.load_into_module(model.lm)
+        print(f"weights loaded in {time.time() - st}")
+        return model
 
     def _load_model(
         self,
@@ -64,23 +157,19 @@ class Predictor(BasePredictor):
         if device is None:
             device = self.device
 
-        name = next(
-            (key for key, val in HF_MODEL_CHECKPOINTS_MAP.items() if val == model_id),
-            None,
-        )
         compression_model = load_compression_model(
-            name, device=device, cache_dir=model_path
+            model_id, device=device, cache_dir=model_path
         )
-        lm = load_lm_model(name, device=device, cache_dir=model_path)
+        lm = load_lm_model(model_id, device=device, cache_dir=model_path)
 
-        return MusicGen(name, compression_model, lm)
+        return MusicGen(model_id, compression_model, lm)
 
     def predict(
         self,
         model_version: str = Input(
             description="Model to use for generation. If set to 'encode-decode', the audio specified via 'input_audio' will simply be encoded and then decoded.",
-            default="melody",
-            choices=["melody", "large", "encode-decode"],
+            default="finetuned",
+            choices=["melody", "small", "medium", "large", "encode-decode", "finetuned"],
         ),
         prompt: str = Input(
             description="A description of the music you want to generate.", default=None
@@ -145,8 +234,32 @@ class Predictor(BasePredictor):
             raise ValueError(
                 "Large model does not support melody input. Set `model_version='melody'` to condition on audio input."
             )
+        elif model_version == "medium" and input_audio and not continuation:
+            raise ValueError(
+                "Medium model does not support melody input. Set `model_version='melody'` to condition on audio input."
+            )
+        elif model_version == "small" and input_audio and not continuation:
+            raise ValueError(
+                "Small model does not support melody input. Set `model_version='melody'` to condition on audio input."
+            )
+        elif model_version == "finetuned":
+            try:
+                self.my_model
+            except:
+                raise NameError(
+                    "There is no fine-tuned 'weight' file found."
+                )
 
-        model = self.melody_model if model_version == "melody" else self.large_model
+        if model_version == "melody":
+            model = self.melody_model
+        elif model_version == "large":
+            model = self.large_model
+        elif model_version == "medium":
+            model = self.medium_model
+        elif model_version == "small":
+            model = self.small_model
+        elif model_version == "finetuned":
+            model = self.my_model
 
         set_generation_params = lambda duration: model.set_generation_params(
             duration=duration,

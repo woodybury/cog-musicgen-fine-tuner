@@ -1,277 +1,243 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
 """
-Adapted from https://github.com/chavinlo/musicgen_trainer/blob/main/train.y
+Entry point for dora to launch solvers for running training loops.
+See more info on how to use dora: https://github.com/facebookresearch/dora
 """
 
+import logging
+import multiprocessing
 import os
-
-MODEL_PATH = '/src/models/'
-os.environ['TRANSFORMERS_CACHE'] = MODEL_PATH
-os.environ['TORCH_HOME'] = MODEL_PATH
-
+import sys
 import typing as tp
+
 import subprocess
 import datetime 
 from cog import BaseModel, Input, Path
-import torchaudio
-from audiocraft.models import MusicGen
-import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader
-from torch.optim import AdamW
-import torch.nn.functional as F
 from zipfile import ZipFile
 import shutil
 
-from torch.utils.data import Dataset
-    
-from audiocraft.modules.conditioners import (
-    ClassifierFreeGuidanceDropout
-)
-from audiocraft.models.loaders import load_compression_model, load_lm_model, HF_MODEL_CHECKPOINTS_MAP
+from dora import git_save, hydra_main, XP
+import flashy
+import hydra
+import omegaconf
+
+from tensorizer import TensorSerializer
+
+from audiocraft.environment import AudioCraftEnvironment
+from audiocraft.utils.cluster import get_slurm_parameters
+
+logger = logging.getLogger(__name__)
 
 
 class TrainingOutput(BaseModel):
     weights: Path
+    model_version: str
 
-MODEL_OUT = "/src/tuned_weights.tensors"
+MODEL_OUT = "src/tuned_weights.tensors"
 CHECKPOINT_DIR = "checkpoints"
 SAVE_STRATEGY = "epoch"
 DIST_OUT_DIR = "tmp/model"
 
+def resolve_config_dset_paths(cfg):
+    """Enable Dora to load manifest from git clone repository."""
+    # manifest files for the different splits
+    for key, value in cfg.datasource.items():
+        if isinstance(value, str):
+            cfg.datasource[key] = git_save.to_absolute_path(value)
 
-def _load_model(
-    model_path: str,  model_name: tp.Optional[str] = None,
-) -> MusicGen:
+def get_solver(cfg):
+    from audiocraft import solvers
+    # Convert batch size to batch size for each GPU
+    assert cfg.dataset.batch_size % flashy.distrib.world_size() == 0
+    cfg.dataset.batch_size //= flashy.distrib.world_size()
+    for split in ['train', 'valid', 'evaluate', 'generate']:
+        if hasattr(cfg.dataset, split) and hasattr(cfg.dataset[split], 'batch_size'):
+            assert cfg.dataset[split].batch_size % flashy.distrib.world_size() == 0
+            cfg.dataset[split].batch_size //= flashy.distrib.world_size()
+    resolve_config_dset_paths(cfg)
+    solver = solvers.get_solver(cfg)
+    return solver
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    compression_model = load_compression_model(model_name, device=device, cache_dir=model_path)
-    lm = load_lm_model(model_name, device=device, cache_dir=model_path)
+def init_seed_and_system(cfg):
+    import numpy as np
+    import torch
+    import random
+    from audiocraft.modules.transformer import set_efficient_attention_backend
 
-    return MusicGen(model_name, compression_model, lm)
+    # multiprocessing.set_start_method(cfg.mp_start_method)
+    logger.debug('Setting mp start method to %s', cfg.mp_start_method)
+    random.seed(cfg.seed)
+    np.random.seed(cfg.seed)
+    # torch also initialize cuda seed if available
+    torch.manual_seed(cfg.seed)
+    # torch.set_num_threads(cfg.num_threads)
+    # os.environ['MKL_NUM_THREADS'] = str(cfg.num_threads)
+    # os.environ['OMP_NUM_THREADS'] = str(cfg.num_threads)
+    # logger.debug('Setting num threads to %d', cfg.num_threads)
+    set_efficient_attention_backend(cfg.efficient_attention_backend)
+    logger.debug('Setting efficient attention backend to %s', cfg.efficient_attention_backend)
 
-class AudioDataset(Dataset):
-    def __init__(self, 
-                data_dir
-                ):
-        self.data_dir = data_dir
-        self.data_map = []
-
-        dir_map = os.listdir(data_dir)
-        for d in dir_map:
-            name, ext = os.path.splitext(d)
-            if ext == '.wav':
-                if os.path.exists(os.path.join(data_dir, name + '.txt')):
-                    self.data_map.append({
-                        "audio": os.path.join(data_dir, d),
-                        "label": os.path.join(data_dir, name + '.txt')
-                    })
-                else:
-                    raise ValueError(f'No label file for {name}')
-                
-    def __len__(self):
-        return len(self.data_map)
+def prepare_data(
+        dataset_path: Path,
+        target_path: str = 'src/train_data',
+        one_same_description: str = None,
+        meta_path: str = 'src/meta'):
+    # decompress file at dataset_path
+    if str(dataset_path).rsplit('.', 1)[1] == 'zip':
+        subprocess.run(['unzip', str(dataset_path), '-d', target_path + '/'])
+    elif str(dataset_path).rsplit('.', 1)[1] == 'tar':
+        subprocess.run(['tar', '-xvf', str(dataset_path), '-C', target_path + '/'])
+    elif str(dataset_path).rsplit('.', 1)[1] == 'gz':
+        subprocess.run(['tar', '-xvzf', str(dataset_path), '-C', target_path + '/'])
+    elif str(dataset_path).rsplit('.', 1)[1] == 'tgz':
+        subprocess.run(['tar', '-xzvf', str(dataset_path), '-C', target_path + '/'])
+    else:
+        raise Exception("Not supported compression file type. The file type should be one of 'zip', 'tar', 'tar.gz' or 'tgz'.")
     
-    def __getitem__(self, idx):
-        data = self.data_map[idx]
-        audio = data['audio']
-        label = data['label']
+    import json
+    from pathlib import Path as Ppath
+    import audiocraft.data.audio_dataset
 
-        return audio, label
-
-def count_nans(tensor):
-    nan_mask = torch.isnan(tensor)
-    num_nans = torch.sum(nan_mask).item()
-    return num_nans
-
-def preprocess_audio(audio_path, model: MusicGen, duration: int = 30):
-    wav, sr = torchaudio.load(audio_path)
-    wav = torchaudio.functional.resample(wav, sr, model.sample_rate)
-    wav = wav.mean(dim=0, keepdim=True)
-    end_sample = int(model.sample_rate * duration)
-
-        # Add padding if necessary
-    if wav.shape[1] < end_sample:
-        pad_size = end_sample - wav.shape[1]
-        wav = F.pad(wav, pad=(0, pad_size))
-
-    wav = wav[:, :end_sample]
-
-    assert wav.shape[0] == 1
-    assert wav.shape[1] == model.sample_rate * duration
-
-    wav = wav.cuda()
-    wav = wav.unsqueeze(1)
-
-    with torch.no_grad():
-        gen_audio = model.compression_model.encode(wav)
-
-    codes, scale = gen_audio
-
-    assert scale is None
-
-    return codes
-
-def fixnan(tensor: torch.Tensor):
-    nan_mask = torch.isnan(tensor)
-    result = torch.where(nan_mask, torch.zeros_like(tensor), tensor)
+    meta = audiocraft.data.audio_dataset.find_audio_files(target_path, audiocraft.data.audio_dataset.DEFAULT_EXTS, progress=True, resolve=False, minimal=True, workers=10)
+    max_sample_rate = 0
+    for m in meta:
+        if m.sample_rate > max_sample_rate:
+            max_sample_rate = m.sample_rate
+        fdict = {
+            "key": "",
+            "artist": "",
+            "sample_rate": m.sample_rate,
+            "file_extension": m.path.rsplit('.', 1)[1],
+            "description": "",
+            "keywords": "",
+            "duration": m.duration,
+            "bpm": "",
+            "genre": "",
+            "title": "",
+            "name": Ppath(m.path).name.rsplit('.', 1)[0],
+            "instrument": "",
+            "moods": []
+        }
+        with open(m.path.rsplit('.', 1)[0] + '.json', "w") as file:
+            json.dump(fdict, file)
+    audiocraft.data.audio_dataset.save_audio_meta(meta_path + '/data.jsonl', meta)
     
-    return result
+    d_path = Ppath(target_path)
+    d_path.mkdir(exist_ok=True, parents=True)
+    audios = list(d_path.rglob('*.mp3')) + list(d_path.rglob('*.wav'))
 
-def one_hot_encode(tensor, num_classes=2048):
-    shape = tensor.shape
-    one_hot = torch.zeros((shape[0], shape[1], num_classes))
+    for audio in list(audios):
+        jsonf = open(str(audio).rsplit('.', 1)[0] + '.json', 'r')
+        fdict = json.load(jsonf)
+        jsonf.close()
+        
+        assert Ppath(str(audio).rsplit('.', 1)[0] + '.txt').exists() or one_same_description is not None
 
-    for i in range(shape[0]):
-        for j in range(shape[1]):
-            index = tensor[i, j].item()
-            one_hot[i, j, index] = 1
+        if one_same_description is not None:
+            fdict["description"] = one_same_description
+        else:
+            f = open(str(audio).rsplit('.', 1)[0] + '.txt', 'r')
+            line = f.readline()
+            f.close()
+            fdict["description"] = line
 
-    return one_hot
+        with open(str(audio).rsplit('.', 1)[0] + '.json', "w") as file:
+            json.dump(fdict, file)
+
+    return max_sample_rate, len(meta)
 
 def train(
         dataset_path: Path = Input("Path to dataset directory",),
-        model_name: str = Input(description="Model version to train.", default="melody", choices=["melody", "large"]),
-        lr: float = Input(description="Learning rate", default=1e-4),
-        epochs: int = Input(description="Number of epochs to train for", default=5),
+        one_same_description: str = Input(description="A description for all of audio data", default=None),
+        model_version: str = Input(description="Model version to train.", default="small", choices=["melody", "small", "medium", "large"]),
+        lr: float = Input(description="Learning rate", default=1),
+        epochs: int = Input(description="Number of epochs to train for", default=2),
+        updates_per_epoch: int = Input(description="Number of iterations for one epoch", default=10),
         save_step: int = Input(description="Save model every n steps", default=None),
-        batch_size: int = Input(description="Batch size", default=1),
+        batch_size: int = Input(description="Batch size", default=9),
+        lr_scheduler: str = Input(description="Type of lr_scheduler", default="cosine", choices=["exponential", "cosine", "polynomial_decay", "inverse_sqrt", "linear_warmup"]),
 ) -> TrainingOutput:
     
-    # For local runs, we'll support overriding `dataset_path` if `train_data` exists. 
-    # That way we can avoid having to tar/untar the dataset for every training run.
-    if os.path.exists('/src/train_data'):
-        dataset_path = '/src/train_data'
-    else:
-        # decompress file at dataset_path
-        subprocess.run(['tar', '-xvzf', dataset_path, '-C', '/src/train_data'])
-        dataset_path = '/src/train_data'
+    meta_path = 'src/meta'
+    target_path = 'src/train_data'
 
-    if batch_size > 1:
-        raise ValueError("Batch size > 1 not supported yet")
-    
     output_dir = DIST_OUT_DIR
     if os.path.exists(output_dir):
         shutil.rmtree(output_dir)
     os.makedirs(output_dir)
-
-    directory = Path(output_dir)
-
-    model = _load_model(MODEL_PATH, model_name=model_name)
-    model.lm = model.lm.to(torch.float32) #important
     
-    dataset = AudioDataset(dataset_path)
-    train_dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    cfg = omegaconf.OmegaConf.load("flatconfig_" + model_version + ".yaml")
+    
+    max_sample_rate, len_dataset = prepare_data(dataset_path, target_path, one_same_description, meta_path)
 
-    learning_rate = lr
-    model.lm.train()
+    cfg.datasource.max_sample_rate = max_sample_rate
+    cfg.datasource.train = meta_path
+    cfg.dataset.train.num_samples = len_dataset
+    cfg.optim.epochs = epochs
+    cfg.optim.updates_per_epoch = updates_per_epoch
+    cfg.optim.lr = lr
+    cfg.logging.log_updates = updates_per_epoch//10
+    cfg.dataset.batch_size = batch_size
 
-    scaler = torch.cuda.amp.GradScaler()
+    init_seed_and_system(cfg)
 
-    #from paper
-    optimizer = AdamW(model.lm.parameters(), lr=learning_rate, betas=(0.9, 0.95), weight_decay=0.1)
+    # Setup logging both to XP specific folder, and to stderr.
+    # log_name = '%s.log.{rank}' % cfg.execute_only if cfg.execute_only else 'solver.log.{rank}'
+    # flashy.setup_logging(level=str(cfg.logging.level).upper(), log_name=log_name)
 
-    criterion = nn.CrossEntropyLoss()
+    # Initialize distributed training, no need to specify anything when using Dora.
+    # flashy.distrib.init()
 
-    num_epochs = epochs
+    solver = get_solver(cfg)
 
-    save_step = save_step
-    save_models = False if save_step is None else True
+    if cfg.show:
+        solver.show()
+        return
 
-    current_step = 0
-    timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+    if cfg.execute_only:
+        assert cfg.execute_inplace or cfg.continue_from is not None, \
+            "Please explicitly specify the checkpoint to continue from with continue_from=<sig_or_path> " + \
+            "when running with execute_only or set execute_inplace to True."
+        solver.restore(replay_metrics=False)  # load checkpoint
+        solver.run_one_stage(cfg.execute_only)
+        return
 
-    for epoch in range(num_epochs):
-        for batch_idx, (audio, label) in enumerate(train_dataloader):
-            optimizer.zero_grad()
+    solver.run()
 
-            #where audio and label are just paths
-            audio = audio[0]
-            label = label[0]
+    # directory = Path(output_dir)
+    directory = solver.checkpoint_path()
+    serializer = TensorSerializer(MODEL_OUT)
+    serializer.write_module(solver.model)
+    serializer.close()
 
-            audio = preprocess_audio(audio, model) #returns tensor
-            text = open(label, 'r').read().strip()
+    # out_path = "training_output.zip"
+    # with ZipFile(out_path, "w") as zip:
+    #     for file_path in directory.rglob("*"):
+    #         print(file_path)
+    #         zip.write(file_path, arcname=file_path.relative_to(directory))
 
-            attributes, _ = model._prepare_tokens_and_attributes([text], None)
+    return TrainingOutput(weights=Path(MODEL_OUT), model_version=model_version)
 
-            conditions = attributes
-            null_conditions = ClassifierFreeGuidanceDropout(p=1.0)(conditions)
-            conditions = conditions + null_conditions
-            tokenized = model.lm.condition_provider.tokenize(conditions)
-            cfg_conditions = model.lm.condition_provider(tokenized)
-            condition_tensors = cfg_conditions
+# From https://gist.github.com/gatheluck/c57e2a40e3122028ceaecc3cb0d152ac
+def set_all_seeds(seed):
+    random.seed(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
 
-            codes = torch.cat([audio, audio], dim=0)
+# main.dora.dir = AudioCraftEnvironment.get_dora_dir()
+# main._base_cfg.slurm = get_slurm_parameters(main._base_cfg.slurm)
 
-            with torch.autocast(device_type="cuda", dtype=torch.float16):
-                lm_output = model.lm.compute_predictions(
-                    codes=codes,
-                    conditions=[],
-                    condition_tensors=condition_tensors
-                )
+# if main.dora.shared is not None and not os.access(main.dora.shared, os.R_OK):
+#     print("No read permission on dora.shared folder, ignoring it.", file=sys.stderr)
+#     main.dora.shared = None
 
-                codes = codes[0]
-                logits = lm_output.logits[0]
-                mask = lm_output.mask[0]
-
-                codes = one_hot_encode(codes, num_classes=2048)
-
-                codes = codes.cuda()
-                logits = logits.cuda()
-                mask = mask.cuda()
-
-                mask = mask.view(-1)
-                masked_logits = logits.view(-1, 2048)[mask]
-                masked_codes = codes.view(-1, 2048)[mask]
-
-                loss = criterion(masked_logits,masked_codes)
-
-            assert count_nans(masked_logits) == 0
-            
-            scaler.scale(loss).backward()
-
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.lm.parameters(), 1.0)
-
-            scaler.step(optimizer)
-            scaler.update()
-
-            print(f"Epoch: {epoch}/{num_epochs}, Batch: {batch_idx}/{len(train_dataloader)}, Loss: {loss.item()}")
-
-            current_step += 1
-
-            if save_models:
-                if current_step % save_step == 0:
-                    torch.save(model.lm.state_dict(), f"{output_dir}/{timestamp}_lm_{current_step}.pt")
-
-    torch.save(model.lm.state_dict(), f"{output_dir}/{timestamp}_lm_final.pt")
-
-    out_path = "training_output.zip"
-    with ZipFile(out_path, "w") as zip:
-        for file_path in directory.rglob("*"):
-            print(file_path)
-            zip.write(file_path, arcname=file_path.relative_to(directory))
-
-    return TrainingOutput(weights=Path(out_path))
-
-
-
-if __name__ == "__main__":
-
-    import argparse
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset_path', type=str, required=True)
-    parser.add_argument('--model_id', type=str, required=False, default='melody')
-    parser.add_argument('--lr', type=float, required=False, default=0.0001)
-    parser.add_argument('--epochs', type=int, required=False, default=5)
-    # parser.add_argument('--use_wandb', type=int, required=False, default=0)
-    parser.add_argument('--save_step', type=int, required=False, default=None)
-    args = parser.parse_args()
-
-    train(
-        dataset_path=args.dataset_path,
-        model_id=args.model_id,
-        lr=args.lr,
-        epochs=args.epochs,
-        save_step=args.save_step,
-    )
+# if __name__ == '__main__':
+    #pp()
