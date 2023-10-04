@@ -26,13 +26,18 @@ import flashy
 import hydra
 import omegaconf
 
+import tarfile
+
 from tensorizer import TensorSerializer
 
 from audiocraft.environment import AudioCraftEnvironment
 from audiocraft.utils.cluster import get_slurm_parameters
 
-logger = logging.getLogger(__name__)
-
+logging.basicConfig(
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s", level=logging.INFO, datefmt="%Y-%m-%d %H:%M:%S"
+)
+logging.getLogger("py4j").setLevel(logging.WARNING)
+logging.getLogger("sh.command").setLevel(logging.ERROR)
 
 class TrainingOutput(BaseModel):
     weights: Path
@@ -70,7 +75,7 @@ def init_seed_and_system(cfg):
     from audiocraft.modules.transformer import set_efficient_attention_backend
 
     # multiprocessing.set_start_method(cfg.mp_start_method)
-    logger.debug('Setting mp start method to %s', cfg.mp_start_method)
+    # logger.debug('Setting mp start method to %s', cfg.mp_start_method)
     random.seed(cfg.seed)
     np.random.seed(cfg.seed)
     # torch also initialize cuda seed if available
@@ -80,7 +85,7 @@ def init_seed_and_system(cfg):
     # os.environ['OMP_NUM_THREADS'] = str(cfg.num_threads)
     # logger.debug('Setting num threads to %d', cfg.num_threads)
     set_efficient_attention_backend(cfg.efficient_attention_backend)
-    logger.debug('Setting efficient attention backend to %s', cfg.efficient_attention_backend)
+    # logger.debug('Setting efficient attention backend to %s', cfg.efficient_attention_backend)
 
 def prepare_data(
         dataset_path: Path,
@@ -210,18 +215,24 @@ def train(
     solver.run()
 
     # directory = Path(output_dir)
-    directory = solver.checkpoint_path()
-    serializer = TensorSerializer(MODEL_OUT)
-    serializer.write_module(solver.model)
-    serializer.close()
+    directory = Path(solver.checkpoint_path())
+    out_path = "trained_model.tar"
+    # serializer = TensorSerializer(MODEL_OUT)
+    # serializer.write_module(solver.model)
+    # serializer.close()
 
+    with tarfile.open(out_path, "w") as tar:
+        for file_path in directory.rglob("*"):
+            print(file_path)
+            arcname = file_path.relative_to(directory)
+            tar.add(file_path, arcname=arcname)
     # out_path = "training_output.zip"
     # with ZipFile(out_path, "w") as zip:
     #     for file_path in directory.rglob("*"):
     #         print(file_path)
     #         zip.write(file_path, arcname=file_path.relative_to(directory))
 
-    return TrainingOutput(weights=Path(MODEL_OUT), model_version=model_version)
+    return TrainingOutput(weights=Path(out_path), model_version=model_version)
 
 # From https://gist.github.com/gatheluck/c57e2a40e3122028ceaecc3cb0d152ac
 def set_all_seeds(seed):
