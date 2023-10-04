@@ -41,7 +41,6 @@ logging.getLogger("sh.command").setLevel(logging.ERROR)
 
 class TrainingOutput(BaseModel):
     weights: Path
-    model_version: str
 
 MODEL_OUT = "src/tuned_weights.tensors"
 CHECKPOINT_DIR = "checkpoints"
@@ -105,7 +104,6 @@ def prepare_data(
         raise Exception("Not supported compression file type. The file type should be one of 'zip', 'tar', 'tar.gz' or 'tgz'.")
     
     import json
-    from pathlib import Path as Ppath
     import audiocraft.data.audio_dataset
 
     meta = audiocraft.data.audio_dataset.find_audio_files(target_path, audiocraft.data.audio_dataset.DEFAULT_EXTS, progress=True, resolve=False, minimal=True, workers=10)
@@ -124,7 +122,7 @@ def prepare_data(
             "bpm": "",
             "genre": "",
             "title": "",
-            "name": Ppath(m.path).name.rsplit('.', 1)[0],
+            "name": Path(m.path).name.rsplit('.', 1)[0],
             "instrument": "",
             "moods": []
         }
@@ -132,7 +130,7 @@ def prepare_data(
             json.dump(fdict, file)
     audiocraft.data.audio_dataset.save_audio_meta(meta_path + '/data.jsonl', meta)
     
-    d_path = Ppath(target_path)
+    d_path = Path(target_path)
     d_path.mkdir(exist_ok=True, parents=True)
     audios = list(d_path.rglob('*.mp3')) + list(d_path.rglob('*.wav'))
 
@@ -141,7 +139,7 @@ def prepare_data(
         fdict = json.load(jsonf)
         jsonf.close()
         
-        assert Ppath(str(audio).rsplit('.', 1)[0] + '.txt').exists() or one_same_description is not None
+        assert Path(str(audio).rsplit('.', 1)[0] + '.txt').exists() or one_same_description is not None
 
         if one_same_description is not None:
             fdict["description"] = one_same_description
@@ -215,24 +213,24 @@ def train(
     solver.run()
 
     # directory = Path(output_dir)
-    directory = Path(solver.checkpoint_path())
-    out_path = "trained_model.tar"
+    directory = Path(str(solver.checkpoint_path()))
+    # print(directory.parent)
+    # print(directory.name)
+    # out_path = "trained_model.tar"
     # serializer = TensorSerializer(MODEL_OUT)
     # serializer.write_module(solver.model)
     # serializer.close()
 
-    with tarfile.open(out_path, "w") as tar:
-        for file_path in directory.rglob("*"):
-            print(file_path)
-            arcname = file_path.relative_to(directory)
-            tar.add(file_path, arcname=arcname)
+    # with tarfile.open(out_path, "w") as tar:
+    #     tar.add(directory, arcname=directory.name)
+
     # out_path = "training_output.zip"
     # with ZipFile(out_path, "w") as zip:
     #     for file_path in directory.rglob("*"):
     #         print(file_path)
     #         zip.write(file_path, arcname=file_path.relative_to(directory))
 
-    return TrainingOutput(weights=Path(out_path), model_version=model_version)
+    return TrainingOutput(weights=Path(directory))
 
 # From https://gist.github.com/gatheluck/c57e2a40e3122028ceaecc3cb0d152ac
 def set_all_seeds(seed):

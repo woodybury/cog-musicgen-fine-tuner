@@ -7,7 +7,9 @@ build:
   cuda: "11.7"
 
   # a list of ubuntu apt packages to install
-  # system_packages:
+  system_packages:
+    - ffmpeg
+    - unzip
     # - "libgl1-mesa-glx"
     # - "libglib2.0-0"
 
@@ -27,7 +29,6 @@ build:
     - "numpy"
     - "sentencepiece"
     - "spacy==3.5.2"
-    # - "torch>=2.0.0"
     - "torchaudio>=2.0.0"
     - "huggingface_hub"
     - "tqdm"
@@ -43,10 +44,9 @@ build:
     - "tensorizer==1.0.1"
   
   # commands run after the environment is setup
-  run:
-    # - "pip install -r requirements.txt"
-    - "apt-get update && apt-get install -y ffmpeg"
-    - "apt-get install unzip"
+  # run:
+  #   - "apt-get update && apt-get install -y ffmpeg"
+  #   - "apt-get install unzip"
   
 # predict.py defines how predictions are run on your model
 predict: "predict.py:Predictor"
