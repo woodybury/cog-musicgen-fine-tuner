@@ -13,7 +13,7 @@ os.environ["TORCH_HOME"] = MODEL_PATH
 import shutil
 
 from tempfile import TemporaryDirectory
-from pathlib import Path
+# from pathlib import Path
 from distutils.dir_util import copy_tree
 from typing import Optional
 from cog import BasePredictor, Input, Path
@@ -57,7 +57,7 @@ def _delete_param(cfg, full_name: str):
     OmegaConf.set_struct(cfg, True)
 
 def load_ckpt(path, device):
-    loaded = torch.load(path)
+    loaded = torch.hub.load_state_dict_from_url(str(path))
     cfg = OmegaConf.create(loaded['xp.cfg'])
     cfg.device = str(device)
     if cfg.device == 'cpu':
@@ -70,39 +70,37 @@ def load_ckpt(path, device):
     _delete_param(cfg, 'conditioners.args.drop_desc_p')
 
     lm = get_lm_model(loaded['xp.cfg'])
-    lm.load_state_dict(loaded['best_state']['model']) 
+    lm.load_state_dict(loaded['model']) 
     lm.eval()
     lm.cfg = cfg
     compression_model = CompressionSolver.wrapped_model_from_checkpoint(cfg, cfg.compression_model_checkpoint, device=device)
     return MusicGen(f"{os.getenv('COG_USERNAME')}/musicgen-finetuned", compression_model, lm)
 
 class Predictor(BasePredictor):
-    def setup(self, weights: Optional[Path] = None, model_version: Optional[str] = None):
+    def setup(self, weights: Optional[Path] = None):
         """Load the model into memory to make running multiple predictions efficient"""
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
         if str(weights) == "weights":
             weights = None
         
-        # self.melody_model = self._load_model(
-        #     model_path=MODEL_PATH,
-        #     cls=MusicGen,
-        #     model_id="facebook/musicgen-melody",
-        # )
+        self.melody_model = self._load_model(
+            model_path=MODEL_PATH,
+            cls=MusicGen,
+            model_id="facebook/musicgen-melody",
+        )
 
-        # self.large_model = self._load_model(
-        #     model_path=MODEL_PATH,
-        #     cls=MusicGen,
-        #     model_id="facebook/musicgen-large",
-        # )
+        self.large_model = self._load_model(
+            model_path=MODEL_PATH,
+            cls=MusicGen,
+            model_id="facebook/musicgen-large",
+        )
 
-        # self.medium_model = self._load_model(
-        #     model_path=MODEL_PATH,
-        #     cls=MusicGen,
-        #     model_id="facebook/musicgen-medium",
-        # )
-
-        print(model_version)
+        self.medium_model = self._load_model(
+            model_path=MODEL_PATH,
+            cls=MusicGen,
+            model_id="facebook/musicgen-medium",
+        )
 
         self.small_model = self._load_model(
             model_path=MODEL_PATH,
@@ -112,8 +110,8 @@ class Predictor(BasePredictor):
 
         if weights is not None:
             # self.my_model = MusicGen.get_pretrained(weights)
-            self.my_model = self.load_tensorizer(weights, model_version)
-            # self.my_model = load_ckpt(weights["weights"], self.device)
+            # self.my_model = self.load_tensorizer(weights, model_version)
+            self.my_model = load_ckpt(weights, self.device)
 
     def load_tensorizer(self, weights, model_version):
         # st = time.time()

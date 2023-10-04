@@ -28,7 +28,7 @@ import omegaconf
 
 import tarfile
 
-from tensorizer import TensorSerializer
+import torch
 
 from audiocraft.environment import AudioCraftEnvironment
 from audiocraft.utils.cluster import get_slurm_parameters
@@ -159,11 +159,13 @@ def train(
         one_same_description: str = Input(description="A description for all of audio data", default=None),
         model_version: str = Input(description="Model version to train.", default="small", choices=["melody", "small", "medium", "large"]),
         lr: float = Input(description="Learning rate", default=1),
-        epochs: int = Input(description="Number of epochs to train for", default=2),
-        updates_per_epoch: int = Input(description="Number of iterations for one epoch", default=10),
+        epochs: int = Input(description="Number of epochs to train for", default=10),
+        updates_per_epoch: int = Input(description="Number of iterations for one epoch", default=500),
         save_step: int = Input(description="Save model every n steps", default=None),
         batch_size: int = Input(description="Batch size", default=9),
         lr_scheduler: str = Input(description="Type of lr_scheduler", default="cosine", choices=["exponential", "cosine", "polynomial_decay", "inverse_sqrt", "linear_warmup"]),
+        warmup: int = Input(description="Warmup of lr_scheduler", default=0),
+        cfg_p: float = Input(description="CFG dropout ratio", default=0.3)
 ) -> TrainingOutput:
     
     meta_path = 'src/meta'
@@ -184,6 +186,12 @@ def train(
     cfg.optim.epochs = epochs
     cfg.optim.updates_per_epoch = updates_per_epoch
     cfg.optim.lr = lr
+    cfg.schedule.lr_scheduler = lr_scheduler
+    cfg.schedule.cosine.warmup = warmup
+    cfg.schedule.polynomial_decay.warmup = warmup
+    cfg.schedule.inverse_sqrt.warmup = warmup
+    cfg.schedule.linear_warmup.warmup = warmup
+    cfg.classifier_free_guidance.training_dropout = cfg_p
     cfg.logging.log_updates = updates_per_epoch//10
     cfg.dataset.batch_size = batch_size
 
@@ -213,10 +221,12 @@ def train(
     solver.run()
 
     # directory = Path(output_dir)
-    directory = Path(str(solver.checkpoint_path()))
+    # directory = Path(str(solver.checkpoint_path()))
+    out_path = "trained_model.tar"
+    torch.save({'xp.cfg': solver.cfg, "model": solver.model.state_dict()}, out_path)
     # print(directory.parent)
     # print(directory.name)
-    # out_path = "trained_model.tar"
+    
     # serializer = TensorSerializer(MODEL_OUT)
     # serializer.write_module(solver.model)
     # serializer.close()
@@ -230,7 +240,7 @@ def train(
     #         print(file_path)
     #         zip.write(file_path, arcname=file_path.relative_to(directory))
 
-    return TrainingOutput(weights=Path(directory))
+    return TrainingOutput(weights=Path(out_path))
 
 # From https://gist.github.com/gatheluck/c57e2a40e3122028ceaecc3cb0d152ac
 def set_all_seeds(seed):
