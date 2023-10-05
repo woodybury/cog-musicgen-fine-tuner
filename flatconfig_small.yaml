@@ -89,17 +89,17 @@ dataset:
   sample_on_weight: false
   min_segment_ratio: 0.8
   train:
-    num_samples: 1000000
+    num_samples: 100000
     shuffle: true
     shuffle_seed: 0
-    permutation_on_files: false
+    permutation_on_files: false #if this is true, then "updates_per_epoch" will work. if false, dataset size is the number of iterations per epoch.
     merge_text_p: 0.25
     drop_desc_p: 0.5
     drop_other_p: 0.5
   valid:
-    num_samples: 10
+    num_samples: 1
   evaluate:
-    num_samples: 10
+    num_samples: 0
   generate:
     num_samples: 0
     return_info: true

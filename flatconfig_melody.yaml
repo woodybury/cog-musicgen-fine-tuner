@@ -15,7 +15,7 @@ label: null
 logging:
   level: INFO
   log_updates: 10
-  log_tensorboard: true
+  log_tensorboard: false
   log_wandb: false
 tensorboard:
   with_media_logging: false

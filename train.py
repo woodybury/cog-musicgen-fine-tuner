@@ -21,7 +21,8 @@ from cog import BaseModel, Input, Path
 from zipfile import ZipFile
 import shutil
 
-from dora import git_save, hydra_main, XP
+from dora import git_save
+from dora.distrib import init
 import flashy
 import hydra
 import omegaconf
@@ -41,11 +42,6 @@ logging.getLogger("sh.command").setLevel(logging.ERROR)
 
 class TrainingOutput(BaseModel):
     weights: Path
-
-MODEL_OUT = "src/tuned_weights.tensors"
-CHECKPOINT_DIR = "checkpoints"
-SAVE_STRATEGY = "epoch"
-DIST_OUT_DIR = "tmp/model"
 
 def resolve_config_dset_paths(cfg):
     """Enable Dora to load manifest from git clone repository."""
@@ -160,21 +156,16 @@ def train(
         model_version: str = Input(description="Model version to train.", default="small", choices=["melody", "small", "medium", "large"]),
         lr: float = Input(description="Learning rate", default=1),
         epochs: int = Input(description="Number of epochs to train for", default=10),
-        updates_per_epoch: int = Input(description="Number of iterations for one epoch", default=500),
+        updates_per_epoch: int = Input(description="Number of iterations for one epoch", default=None),
         save_step: int = Input(description="Save model every n steps", default=None),
         batch_size: int = Input(description="Batch size", default=9),
         lr_scheduler: str = Input(description="Type of lr_scheduler", default="cosine", choices=["exponential", "cosine", "polynomial_decay", "inverse_sqrt", "linear_warmup"]),
         warmup: int = Input(description="Warmup of lr_scheduler", default=0),
-        cfg_p: float = Input(description="CFG dropout ratio", default=0.3)
+        cfg_p: float = Input(description="CFG dropout ratio", default=0.3),
 ) -> TrainingOutput:
     
     meta_path = 'src/meta'
     target_path = 'src/train_data'
-
-    output_dir = DIST_OUT_DIR
-    if os.path.exists(output_dir):
-        shutil.rmtree(output_dir)
-    os.makedirs(output_dir)
     
     cfg = omegaconf.OmegaConf.load("flatconfig_" + model_version + ".yaml")
     
@@ -184,7 +175,6 @@ def train(
     cfg.datasource.train = meta_path
     cfg.dataset.train.num_samples = len_dataset
     cfg.optim.epochs = epochs
-    cfg.optim.updates_per_epoch = updates_per_epoch
     cfg.optim.lr = lr
     cfg.schedule.lr_scheduler = lr_scheduler
     cfg.schedule.cosine.warmup = warmup
@@ -194,6 +184,12 @@ def train(
     cfg.classifier_free_guidance.training_dropout = cfg_p
     cfg.logging.log_updates = updates_per_epoch//10
     cfg.dataset.batch_size = batch_size
+    if updates_per_epoch is None:
+        cfg.dataset.train.permutation_on_files = False
+        cfg.optim.updates_per_epoch = 1
+    else:
+        cfg.dataset.train.permutation_on_files = True
+        cfg.optim.updates_per_epoch = updates_per_epoch
 
     init_seed_and_system(cfg)
 
@@ -202,7 +198,7 @@ def train(
     # flashy.setup_logging(level=str(cfg.logging.level).upper(), log_name=log_name)
 
     # Initialize distributed training, no need to specify anything when using Dora.
-    # flashy.distrib.init()
+    flashy.distrib.init()
 
     solver = get_solver(cfg)
 

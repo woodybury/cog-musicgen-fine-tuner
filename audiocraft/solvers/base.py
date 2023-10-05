@@ -31,8 +31,6 @@ from flashy.loggers.base import ExperimentLogger
 from flashy.loggers.localfs import LocalFSLogger
 import logging
 
-from tqdm import tqdm
-
 logger = logging.getLogger(__name__)
 
 class LocalFSLoggerR(LocalFSLogger):
@@ -555,7 +553,7 @@ class StandardSolver(ABC, flashy.BaseSolver):
         assert len(self.state_dict()) > 0
         self.restore(replay_metrics=True)  # load checkpoint and replay history
         self.log_hyperparams(dict_from_config(self.cfg))
-        for epoch in tqdm(range(self.epoch, self.cfg.optim.epochs + 1)):
+        for epoch in range(self.epoch, self.cfg.optim.epochs + 1):
             if self.should_stop_training():
                 return
             self.run_epoch()
@@ -591,7 +589,7 @@ class StandardSolver(ABC, flashy.BaseSolver):
         if self.cfg.benchmark_no_load:
             self.logger.warning("Fake loading for benchmarking: re-using first batch")
             batch = next(iter(loader))
-            loader = [batch] * updates_per_epoch  # type: ignore
+            loader = [batch] * updates_per_epoch  # type: ignore  
         lp = self.log_progress(self.current_stage, loader, total=updates_per_epoch, updates=self.log_updates)
         average = flashy.averager()  # epoch wise average
         instant_average = flashy.averager()  # average between two logging

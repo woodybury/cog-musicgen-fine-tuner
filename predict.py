@@ -9,16 +9,9 @@ MODEL_PATH = "/src/models/"
 os.environ["TRANSFORMERS_CACHE"] = MODEL_PATH
 os.environ["TORCH_HOME"] = MODEL_PATH
 
-
-import shutil
-
-from tempfile import TemporaryDirectory
-# from pathlib import Path
-from distutils.dir_util import copy_tree
 from typing import Optional
 from cog import BasePredictor, Input, Path
 import torch
-import datetime
 
 # Model specific imports
 import torchaudio
@@ -27,7 +20,7 @@ import typing as tp
 import numpy as np
 
 from audiocraft.models import MusicGen
-from audiocraft.models.musicgen import _HF_MODEL_CHECKPOINTS_MAP as HF_MODEL_CHECKPOINTS_MAP
+from audiocraft.solvers.compression import CompressionSolver
 from audiocraft.models.loaders import (
     load_compression_model,
     load_lm_model,
@@ -37,12 +30,7 @@ from audiocraft.data.audio import audio_write
 from audiocraft.models.builders import get_lm_model, get_compression_model, get_wrapped_compression_model
 from omegaconf import OmegaConf
 
-from tensorizer import TensorDeserializer
-from tensorizer.utils import no_init_or_tensor
-import re
-import time
 import subprocess
-import logging
 
 def _delete_param(cfg, full_name: str):
     parts = full_name.split('.')
@@ -112,36 +100,6 @@ class Predictor(BasePredictor):
             # self.my_model = MusicGen.get_pretrained(weights)
             # self.my_model = self.load_tensorizer(weights, model_version)
             self.my_model = load_ckpt(weights, self.device)
-
-    def load_tensorizer(self, weights, model_version):
-        # st = time.time()
-        # weights = str(weights)
-        # print("loadin")
-        # print(weights)
-        # pattern = r"https://pbxt\.replicate\.delivery/([^/]+/[^/]+)"
-        # match = re.search(pattern, weights)
-        # if match:
-        #     weights = f"gs://replicate-files/{match.group(1)}"
-
-        # print(f"deserializing weights")
-        # local_weights = "/src/musicgen_tensors"
-        # command = f"/gc/google-cloud-sdk/bin/gcloud storage cp {weights} {local_weights}".split()
-        # res = subprocess.run(command)
-        # if res.returncode != 0:
-        #     raise Exception(
-        #         f"gcloud storage cp command failed with return code {res.returncode}: {res.stderr.decode('utf-8')}"
-        #     )
-
-        logging.disable(logging.WARN)
-        model = no_init_or_tensor(
-            lambda: MusicGen.get_pretrained(f'facebook/musicgen-{model_version}')
-        )
-        logging.disable(logging.NOTSET)
-
-        des = TensorDeserializer(weights, plaid_mode=True)
-        des.load_into_module(model.lm)
-        print(f"weights loaded in {time.time() - st}")
-        return model
 
     def _load_model(
         self,
