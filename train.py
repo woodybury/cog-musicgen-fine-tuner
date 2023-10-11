@@ -23,7 +23,6 @@ from zipfile import ZipFile
 import shutil
 import subprocess as sp
 
-import dora_main
 import dora
 from dora import git_save
 from dora.distrib import init
@@ -61,8 +60,10 @@ def prepare_data(
         subprocess.run(['tar', '-xvzf', str(dataset_path), '-C', target_path + '/'])
     elif str(dataset_path).rsplit('.', 1)[1] == 'tgz':
         subprocess.run(['tar', '-xzvf', str(dataset_path), '-C', target_path + '/'])
+    elif str(dataset_path).rsplit('.', 1)[1] in ['wav', 'mp3', 'flac']:
+        os.move(str(dataset_path), target_path + '/' + str(dataset_path.name))
     else:
-        raise Exception("Not supported compression file type. The file type should be one of 'zip', 'tar', 'tar.gz' or 'tgz'.")
+        raise Exception("Not supported compression file type. The file type should be one of 'zip', 'tar', 'tar.gz', 'tgz' types of compression file, or a single 'wav', 'mp3', 'flac' types of audio file.")
     
     from pydub import AudioSegment
     
@@ -134,7 +135,7 @@ def prepare_data(
 def train(
         dataset_path: Path = Input("Path to dataset directory",),
         one_same_description: str = Input(description="A description for all of audio data", default=None),
-        model_version: str = Input(description="Model version to train.", default="small", choices=["melody", "small", "medium", "large"]),
+        model_version: str = Input(description="Model version to train.", default="small", choices=["melody", "small", "medium"]),
         epochs: int = Input(description="Number of epochs to train for", default=10),
         updates_per_epoch: int = Input(description="Number of iterations for one epoch", default=None),
         save_step: int = Input(description="Save model every n steps", default=None),
@@ -172,6 +173,10 @@ def train(
     # else:
     #     cfg.dataset.train.permutation_on_files = True
     #     cfg.optim.updates_per_epoch = updates_per_epoch
+
+    if model_version == "medium":
+        batch_size = 8
+        print(f"Batch size is reset to {batch_size}, since `medium` model can only be trained with 8 with current GPU settings.")
 
     if batch_size % 8 != 0:
         batch_size = batch_size - (batch_size%8)
@@ -225,6 +230,10 @@ def train(
     
     loaded = torch.load(checkpoint_dir)
     out_path = "trained_model.tar"
+
+    if os.path.isfile(out_path):
+        os.remove(out_path)
+
     torch.save({'xp.cfg': loaded["xp.cfg"], "model": loaded["model"]}, out_path)
     # print(directory.parent)
     # print(directory.name)
@@ -241,6 +250,11 @@ def train(
     #     for file_path in directory.rglob("*"):
     #         print(file_path)
     #         zip.write(file_path, arcname=file_path.relative_to(directory))
+
+    import shutil
+    shutil.rmtree('src/meta')
+    shutil.rmtree('src/train_data')
+    shutil.rmtree('tmp')
 
     return TrainingOutput(weights=Path(out_path))
 

@@ -30,7 +30,7 @@ conditioners:
       match_len_on_eval: false
       eval_wavs: null
       n_eval_wavs: 100
-      cache_path: null
+      cache_path: cache
   description:
     model: t5
     t5:

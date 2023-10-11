@@ -244,10 +244,10 @@ class Predictor(BasePredictor):
             set_generation_params(duration)
             wav = model.generate([prompt], progress=True)
 
-        # elif model_version == "encode-decode":
-        #     encoded_audio = self._preprocess_audio(input_audio, model)
-        #     set_generation_params(duration)
-        #     wav = model.compression_model.decode(encoded_audio).squeeze(0)
+        elif model_version == "encode-decode":
+            encoded_audio = self._preprocess_audio(input_audio, model)
+            set_generation_params(duration)
+            wav = model.compression_model.decode(encoded_audio).squeeze(0)
 
         else:
             input_audio, sr = torchaudio.load(input_audio)
