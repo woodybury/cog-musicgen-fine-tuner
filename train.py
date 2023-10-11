@@ -64,6 +64,22 @@ def prepare_data(
     else:
         raise Exception("Not supported compression file type. The file type should be one of 'zip', 'tar', 'tar.gz' or 'tgz'.")
     
+    from pydub import AudioSegment
+    
+    for filename in os.listdir(target_path):
+        if filename.endswith(('.mp3', '.wav', '.flac')):
+            # move original file out of the way
+            audio = AudioSegment.from_file(target_path + '/' + filename)
+
+            # resample
+            audio = audio.set_frame_rate(44100)
+
+            # split into 30-second chunks
+            for i in range(0, len(audio), 30000):
+                chunk = audio[i:i+30000]
+                chunk.export(f"{target_path + '/' + filename[:-4]}_chunk{i//1000}.wav", format="wav")
+            os.remove(target_path + '/' + filename)
+
     import json
     import audiocraft.data.audio_dataset
 

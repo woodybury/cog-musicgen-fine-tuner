@@ -41,6 +41,7 @@ build:
     - "encodec"
     - "protobuf"
     - "tensorboard>=1.15"
+    - "pydub"
   
   # commands run after the environment is setup
   # run:
