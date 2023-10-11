@@ -23,7 +23,7 @@ deadlock:
 
 dataset:
   batch_size: ???
-  num_workers: 10
+  num_workers: 8
   segment_duration: null
   num_samples: null
   return_info: false

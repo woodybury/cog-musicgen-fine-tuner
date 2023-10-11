@@ -57,8 +57,12 @@ class AudioCraftEnvironment:
 
         self.cluster: str = cluster
 
-        config_path = Path(__file__).parent.parent.joinpath("src/config/teams", self.team).with_suffix(".yaml")
-
+        config_path = os.getenv(
+            "AUDIOCRAFT_CONFIG",
+            Path(__file__)
+            .parent.parent.joinpath("config/teams", self.team)
+            .with_suffix(".yaml"),
+        )
         self.config = omegaconf.OmegaConf.load(config_path)
         self._dataset_mappers = []
         cluster_config = self._get_cluster_config()

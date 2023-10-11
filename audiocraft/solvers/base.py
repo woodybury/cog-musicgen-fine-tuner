@@ -13,7 +13,6 @@ import flashy
 import omegaconf
 import torch
 from torch import nn
-import dora
 
 from .. import optim
 from ..optim import fsdp
@@ -24,43 +23,6 @@ from ..utils.deadlock import DeadlockDetect
 from ..utils.profiler import Profiler
 from ..utils.utils import copy_state, dict_from_config, model_hash, with_rank_rng
 
-from flashy.formatter import Formatter
-from flashy.logging import ResultLogger
-from flashy.state import StateManager
-from flashy.loggers.base import ExperimentLogger
-from flashy.loggers.localfs import LocalFSLogger
-import logging
-
-logger = logging.getLogger(__name__)
-
-class LocalFSLoggerR(LocalFSLogger):
-    def __init__(self, save_dir: tp.Union[Path, str], with_media_logging: bool, name: tp.Optional[str] = None,
-                 use_subdirs: bool = False):
-        super.__init__(save_dir, with_media_logging, name, use_subdirs)
-    
-    @classmethod
-    def from_xp(cls, xp:dora.xp.XP, with_media_logging: bool = True,
-                name: tp.Optional[str] = None, sub_dir: tp.Optional[str] = None):
-        save_dir = xp.folder / 'outputs'
-        if sub_dir:
-            save_dir = save_dir / sub_dir
-        save_dir.mkdir(exist_ok=True, parents=True)
-        return LocalFSLogger(save_dir, with_media_logging, name)
-
-class ResultLoggerR(ResultLogger):
-    """Logger for experiment results.
-
-    Logs summary of training metrics in stdout and media samples
-    across the specified platforms experiment loggers.
-    """
-
-    def __init__(self, logger: logging.Logger, xp:dora.xp.XP, level: int = logging.INFO,
-                 delimiter: str = '|'):
-        self._logger = logger
-        self._level = level
-        self._delimiter = delimiter
-        self._experiment_loggers: tp.Dict[str, ExperimentLogger] = {}
-        self._experiment_loggers['local'] = LocalFSLoggerR.from_xp(with_media_logging=True, xp=xp)
 
 class StandardSolver(ABC, flashy.BaseSolver):
     """Standard solver for AudioCraft.
@@ -74,24 +36,10 @@ class StandardSolver(ABC, flashy.BaseSolver):
     associated to each stage as well as the show, build_model and build_dataloaders methods.
     """
     def __init__(self, cfg: omegaconf.DictConfig):
-        self.cfg = cfg
-
-        # super.__init__ from here
-        self.stateful = StateManager()
-        self.xp = self.get_xp()
-        print('xp.folder : ', self.xp.folder)
-        self.register_stateful('history')
-        self.register_stateful('xp.cfg', 'xp.sig', write_only=True)
-        self.logger = logger
-        self.result_logger = ResultLoggerR(self.logger, xp=self.xp)
-
-        self._current_stage: tp.Optional[str] = None
-        self._current_formatter: tp.Optional[Formatter] = None
-        self._start_epoch()
-        # to here
-
+        super().__init__()
         self.logger.info(f"Instantiating solver {self.__class__.__name__} for XP {self.xp.sig}")
         self.logger.info(f"All XP logs are stored in {self.xp.folder}")
+        self.cfg = cfg
         self.device = cfg.device
         self.model: nn.Module
         self._continue_best_source_keys = ['best_state', 'fsdp_best_state']
@@ -145,16 +93,6 @@ class StandardSolver(ABC, flashy.BaseSolver):
         mem_usage = model_size * 4 * 4 / 1000
         self.logger.info("Model size: %.2f M params", model_size)
         self.logger.info("Base memory usage, with model, grad and optim: %.2f GB", mem_usage)
-
-    def get_xp(self):
-        _dora = dora.conf.DoraConfig()
-        if hasattr(self.cfg, "dora"):
-            dora.conf.update_from_hydra(_dora, self.cfg.dora)
-        _dora.exclude += ["dora.*", "slurm.*"]
-        _dora.dir = Path(_dora.dir)
-
-        xp = dora.xp.XP(dora=_dora, cfg=self.cfg, argv=[], sig='cog')
-        return xp
 
     @property
     def autocast(self):
@@ -589,7 +527,7 @@ class StandardSolver(ABC, flashy.BaseSolver):
         if self.cfg.benchmark_no_load:
             self.logger.warning("Fake loading for benchmarking: re-using first batch")
             batch = next(iter(loader))
-            loader = [batch] * updates_per_epoch  # type: ignore  
+            loader = [batch] * updates_per_epoch  # type: ignore
         lp = self.log_progress(self.current_stage, loader, total=updates_per_epoch, updates=self.log_updates)
         average = flashy.averager()  # epoch wise average
         instant_average = flashy.averager()  # average between two logging

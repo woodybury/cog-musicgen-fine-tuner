@@ -59,7 +59,7 @@ class MusicGenSolver(base.StandardSolver):
                     min_length=self.cfg.optim.updates_per_epoch or 1)
                 self.dataloaders['original_train'] = self.dataloaders['train']
                 self.dataloaders['train'] = self._cached_batch_loader  # type: ignore
-      
+
     @staticmethod
     def get_eval_solver_from_sig(sig: str, dtype: tp.Optional[str] = None,
                                  device: tp.Optional[str] = None, autocast: bool = True,

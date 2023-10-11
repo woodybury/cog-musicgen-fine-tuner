@@ -57,7 +57,7 @@ slurm:
 # dora parameters
 dora:
   # Output folder for all artifacts of an experiment.
-  dir: /checkpoint/${oc.env:USER}/experiments/audiocraft/outputs
+  dir: ./dora
   # The following entries will be ignored by dora when computing the unique XP signature.
   # Note that slurm.* and dora.* are automatically ignored.
   exclude: [

@@ -71,35 +71,36 @@ class Predictor(BasePredictor):
 
         if str(weights) == "weights":
             weights = None
-        
-        self.melody_model = self._load_model(
-            model_path=MODEL_PATH,
-            cls=MusicGen,
-            model_id="facebook/musicgen-melody",
-        )
 
-        self.large_model = self._load_model(
-            model_path=MODEL_PATH,
-            cls=MusicGen,
-            model_id="facebook/musicgen-large",
-        )
-
-        self.medium_model = self._load_model(
-            model_path=MODEL_PATH,
-            cls=MusicGen,
-            model_id="facebook/musicgen-medium",
-        )
-
-        self.small_model = self._load_model(
-            model_path=MODEL_PATH,
-            cls=MusicGen,
-            model_id="facebook/musicgen-small",
-        )
 
         if weights is not None:
             # self.my_model = MusicGen.get_pretrained(weights)
             # self.my_model = self.load_tensorizer(weights, model_version)
             self.my_model = load_ckpt(weights, self.device)
+        else:
+            self.melody_model = self._load_model(
+                model_path=MODEL_PATH,
+                cls=MusicGen,
+                model_id="facebook/musicgen-melody",
+            )
+
+            self.large_model = self._load_model(
+                model_path=MODEL_PATH,
+                cls=MusicGen,
+                model_id="facebook/musicgen-large",
+            )
+
+            self.medium_model = self._load_model(
+                model_path=MODEL_PATH,
+                cls=MusicGen,
+                model_id="facebook/musicgen-medium",
+            )
+
+            self.small_model = self._load_model(
+                model_path=MODEL_PATH,
+                cls=MusicGen,
+                model_id="facebook/musicgen-small",
+            )
 
     def _load_model(
         self,
@@ -123,7 +124,7 @@ class Predictor(BasePredictor):
     def predict(
         self,
         model_version: str = Input(
-            description="Model to use for generation. If set to 'encode-decode', the audio specified via 'input_audio' will simply be encoded and then decoded.",
+            description="Model to use for generation. If the model is fine-tuned from MusicGen, then only `finetuned` will work in the newly created fine-tuned model repository.",
             default="finetuned",
             choices=["melody", "small", "medium", "large", "encode-decode", "finetuned"],
         ),
@@ -203,8 +204,16 @@ class Predictor(BasePredictor):
                 self.my_model
             except:
                 raise NameError(
-                    "There is no fine-tuned 'weight' file found."
+                    "There is no fine-tuned 'weight' file found. Is the model page you are running with is created from additional training process?"
                 )
+        elif model_version != "finetuned":
+            try:
+                self.my_model
+                raise NameError(
+                    "You must set `model_version` value as `finetuned`, when the model is fine-tuned from MusicGen."
+                )
+            except:
+                pass
 
         if model_version == "melody":
             model = self.melody_model
@@ -235,10 +244,10 @@ class Predictor(BasePredictor):
             set_generation_params(duration)
             wav = model.generate([prompt], progress=True)
 
-        elif model_version == "encode-decode":
-            encoded_audio = self._preprocess_audio(input_audio, model)
-            set_generation_params(duration)
-            wav = model.compression_model.decode(encoded_audio).squeeze(0)
+        # elif model_version == "encode-decode":
+        #     encoded_audio = self._preprocess_audio(input_audio, model)
+        #     set_generation_params(duration)
+        #     wav = model.compression_model.decode(encoded_audio).squeeze(0)
 
         else:
             input_audio, sr = torchaudio.load(input_audio)
@@ -291,6 +300,8 @@ class Predictor(BasePredictor):
 
         if output_format == "mp3":
             mp3_path = "out.mp3"
+            if Path(mp3_path).exists():
+                os.remove(mp3_path)
             subprocess.call(["ffmpeg", "-i", wav_path, mp3_path])
             os.remove(wav_path)
             path = mp3_path

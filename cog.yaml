@@ -41,7 +41,6 @@ build:
     - "encodec"
     - "protobuf"
     - "tensorboard>=1.15"
-    - "tensorizer==1.0.1"
   
   # commands run after the environment is setup
   # run:

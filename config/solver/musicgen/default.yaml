@@ -27,16 +27,16 @@ cache:
 
 dataset:
   batch_size: 128
-  num_workers: 10
+  num_workers: 8
   segment_duration: 30
   min_segment_ratio: 0.8  # lower values such as 0.5 result in generations with a lot of silence.
   return_info: true
   train:
     num_samples: 1000000 # need a randomly large number here for AudioDataset
   valid:
-    num_samples: 10000
+    num_samples: 10
   generate:
-    num_samples: 50
+    num_samples: 0
 
 metrics:
   fad:
@@ -99,8 +99,8 @@ evaluate:
 
 checkpoint:
   save_last: true
-  save_every: 50
-  keep_last: 10
+  save_every: null
+  keep_last: null
   keep_every_states: null
 
 optim:
