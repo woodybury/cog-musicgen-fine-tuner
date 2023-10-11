@@ -50,7 +50,8 @@ def prepare_data(
         dataset_path: Path,
         target_path: str = 'src/train_data',
         one_same_description: str = None,
-        meta_path: str = 'src/meta'):
+        meta_path: str = 'src/meta',
+        auto_labeling: bool = True):
     # decompress file at dataset_path
     if str(dataset_path).rsplit('.', 1)[1] == 'zip':
         subprocess.run(['unzip', str(dataset_path), '-d', target_path + '/'])
@@ -133,12 +134,12 @@ def prepare_data(
     return max_sample_rate, len(meta)
 
 def train(
-        dataset_path: Path = Input("Path to dataset directory",),
+        dataset_path: Path = Input("Path to dataset directory. Input audio files will be chunked into multiple 30 second audio files. Must be one of 'tar', 'tar.gz', 'gz', 'zip' types of compressed file, or a single 'wav', 'mp3', 'flac' file.",),
+        auto_labeling: bool = Input(description="Creating label data like genre, mood, theme, instrumentation, key, bpm for each track. Using `essentia-tensorflow` for music information retrieval.", default=True),
         one_same_description: str = Input(description="A description for all of audio data", default=None),
         model_version: str = Input(description="Model version to train.", default="small", choices=["melody", "small", "medium"]),
-        epochs: int = Input(description="Number of epochs to train for", default=10),
-        updates_per_epoch: int = Input(description="Number of iterations for one epoch", default=None),
-        save_step: int = Input(description="Save model every n steps", default=None),
+        epochs: int = Input(description="Number of epochs to train for", default=3),
+        updates_per_epoch: int = Input(description="Number of iterations for one epoch", default=100),
         batch_size: int = Input(description="Batch size. Must be multiple of 8(number of gpus), for 8-gpu training.", default=20),
         optimizer: str = Input(description="Type of optimizer.", default='dadam', choices=["dadam", "adamw"]),
         lr: float = Input(description="Learning rate", default=1),
@@ -150,7 +151,7 @@ def train(
     meta_path = 'src/meta'
     target_path = 'src/train_data'
     
-    max_sample_rate, len_dataset = prepare_data(dataset_path, target_path, one_same_description, meta_path)
+    max_sample_rate, len_dataset = prepare_data(dataset_path, target_path, one_same_description, meta_path, auto_labeling)
 
     # cfg = omegaconf.OmegaConf.load("flatconfig_" + model_version + ".yaml")
         

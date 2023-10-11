@@ -125,7 +125,7 @@ class Predictor(BasePredictor):
         self,
         model_version: str = Input(
             description="Model to use for generation. If the model is fine-tuned from MusicGen, then only `finetuned` will work in the newly created fine-tuned model repository.",
-            default="finetuned",
+            default="medium",
             choices=["melody", "small", "medium", "large", "encode-decode", "finetuned"],
         ),
         prompt: str = Input(
