@@ -19,7 +19,7 @@ import subprocess
 import typing as tp
 import numpy as np
 
-from audiocraft.models import MusicGen
+from audiocraft.models import MusicGen, MultiBandDiffusion
 from audiocraft.solvers.compression import CompressionSolver
 from audiocraft.models.loaders import (
     load_compression_model,
@@ -68,6 +68,8 @@ class Predictor(BasePredictor):
     def setup(self, weights: Optional[Path] = None):
         """Load the model into memory to make running multiple predictions efficient"""
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
+
+        self.mbd = MultiBandDiffusion.get_mbd_musicgen()
 
         if str(weights) == "weights":
             weights = None
@@ -156,6 +158,10 @@ class Predictor(BasePredictor):
             description="End time of the audio file to use for continuation. If -1 or None, will default to the end of the audio clip.",
             default=None,
             ge=0,
+        ),
+        multi_band_diffusion: bool = Input(
+            description="If `True`, the EnCodec tokens will be decoded with MultiBand Diffusion.",
+            default=False,
         ),
         normalization_strategy: str = Input(
             description="Strategy for normalizing audio.",
@@ -249,7 +255,7 @@ class Predictor(BasePredictor):
 
         if not input_audio:
             set_generation_params(duration)
-            wav = model.generate([prompt], progress=True)
+            wav, tokens = model.generate([prompt], progress=True, return_tokens=True)
 
         # elif model_version == "encode-decode":
         #     encoded_audio = self._preprocess_audio(input_audio, model)
@@ -284,18 +290,21 @@ class Predictor(BasePredictor):
                     )
 
                 set_generation_params(duration + input_audio_duration)
-                wav = model.generate_continuation(
+                wav, tokens = model.generate_continuation(
                     prompt=input_audio_wavform,
                     prompt_sample_rate=sr,
                     descriptions=[prompt],
                     progress=True,
+                    return_tokens=True,
                 )
 
             else:
                 set_generation_params(duration)
-                wav = model.generate_with_chroma(
-                    [prompt], input_audio_wavform, sr, progress=True
+                wav, tokens = model.generate_with_chroma(
+                    [prompt], input_audio_wavform, sr, progress=True, return_tokens=True
                 )
+        if multi_band_diffusion:
+            wav = self.mbd.tokens_to_wav(tokens)
 
         audio_write(
             "out",
