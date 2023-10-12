@@ -22,6 +22,7 @@ from cog import BaseModel, Input, Path
 from zipfile import ZipFile
 import shutil
 import subprocess as sp
+from tqdm import tqdm
 
 from dora import git_save
 from dora.distrib import init
@@ -56,7 +57,8 @@ def prepare_data(
         target_path: str = 'src/train_data',
         one_same_description: str = None,
         meta_path: str = 'src/meta',
-        auto_labeling: bool = True):
+        auto_labeling: bool = True,
+        drop_vocals: bool = True):
     
     d_path = Path(target_path)
     d_path.mkdir(exist_ok=True, parents=True)
@@ -75,17 +77,32 @@ def prepare_data(
     else:
         raise Exception("Not supported compression file type. The file type should be one of 'zip', 'tar', 'tar.gz', 'tgz' types of compression file, or a single 'wav', 'mp3', 'flac' types of audio file.")
     
-    # Chuking audio files into 30sec chunks / Resampling to 44100hz
+    # Audio Chunking and Vocal Dropping
+
     from pydub import AudioSegment
-    
-    for filename in os.listdir(target_path):
+    if drop_vocals:
+        import demucs.api
+        import torchaudio
+        separator = demucs.api.Separator(model="mdx_extra")
+    else:
+        separator = None
+
+    for filename in tqdm(os.listdir(target_path)):
         if filename.endswith(('.mp3', '.wav', '.flac')):
-            # move original file out of the way
+            if drop_vocals and separator is not None:
+                print('Separating Vocals from ' + filename)
+                origin, separated = separator.separate_audio_file(target_path + '/' + filename)
+                mixed = separated["bass"] + separated["drums"] + separated["other"]
+                torchaudio.save(target_path + '/' + filename, mixed, separator.samplerate)
+            
+
+            # Chuking audio files into 30sec chunks
+
             audio = AudioSegment.from_file(target_path + '/' + filename)
+            audio = audio.set_frame_rate(44100) # resample to 44100
 
-            # resample
-            audio = audio.set_frame_rate(44100)
-
+            print('Chunking ' + filename)
+            
             # split into 30-second chunks
             for i in range(0, len(audio), 30000):
                 chunk = audio[i:i+30000]
@@ -155,7 +172,6 @@ def prepare_data(
 
         train_len = 0
         # eval_len = 0
-        from tqdm import tqdm
         import librosa
 
         os.mkdir(meta_path)
@@ -278,6 +294,7 @@ def prepare_data(
 def train(
         dataset_path: Path = Input("Path to dataset directory. Input audio files will be chunked into multiple 30 second audio files. Must be one of 'tar', 'tar.gz', 'gz', 'zip' types of compressed file, or a single 'wav', 'mp3', 'flac' file. Audio files must be longer than 30 seconds.",),
         auto_labeling: bool = Input(description="Creating label data like genre, mood, theme, instrumentation, key, bpm for each track. Using `essentia-tensorflow` for music information retrieval.", default=True),
+        drop_vocals: bool = Input(description="Dropping the vocal tracks from the audio files in dataset, by separating sources with Demucs.", default=True),
         one_same_description: str = Input(description="A description for all of audio data", default=None),
         model_version: str = Input(description="Model version to train.", default="small", choices=["melody", "small", "medium"]),
         epochs: int = Input(description="Number of epochs to train for", default=3),
@@ -307,7 +324,7 @@ def train(
     if os.path.isdir('tmp'):
         shutil.rmtree('tmp')
 
-    max_sample_rate, len_dataset = prepare_data(dataset_path, target_path, one_same_description, meta_path, auto_labeling)
+    max_sample_rate, len_dataset = prepare_data(dataset_path, target_path, one_same_description, meta_path, auto_labeling, drop_vocals)
 
     # cfg = omegaconf.OmegaConf.load("flatconfig_" + model_version + ".yaml")
         

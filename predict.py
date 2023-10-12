@@ -76,31 +76,36 @@ class Predictor(BasePredictor):
         if weights is not None:
             # self.my_model = MusicGen.get_pretrained(weights)
             # self.my_model = self.load_tensorizer(weights, model_version)
-            self.my_model = load_ckpt(weights, self.device)
+            self.model = load_ckpt(weights, self.device)
         else:
-            self.melody_model = self._load_model(
+            self.model = self._load_model(
                 model_path=MODEL_PATH,
                 cls=MusicGen,
                 model_id="facebook/musicgen-melody",
             )
+            # self.melody_model = self._load_model(
+            #     model_path=MODEL_PATH,
+            #     cls=MusicGen,
+            #     model_id="facebook/musicgen-melody",
+            # )
 
-            self.large_model = self._load_model(
-                model_path=MODEL_PATH,
-                cls=MusicGen,
-                model_id="facebook/musicgen-large",
-            )
+            # self.large_model = self._load_model(
+            #     model_path=MODEL_PATH,
+            #     cls=MusicGen,
+            #     model_id="facebook/musicgen-large",
+            # )
 
-            self.medium_model = self._load_model(
-                model_path=MODEL_PATH,
-                cls=MusicGen,
-                model_id="facebook/musicgen-medium",
-            )
+            # self.medium_model = self._load_model(
+            #     model_path=MODEL_PATH,
+            #     cls=MusicGen,
+            #     model_id="facebook/musicgen-medium",
+            # )
 
-            self.small_model = self._load_model(
-                model_path=MODEL_PATH,
-                cls=MusicGen,
-                model_id="facebook/musicgen-small",
-            )
+            # self.small_model = self._load_model(
+            #     model_path=MODEL_PATH,
+            #     cls=MusicGen,
+            #     model_id="facebook/musicgen-small",
+            # )
 
     def _load_model(
         self,
@@ -123,11 +128,11 @@ class Predictor(BasePredictor):
 
     def predict(
         self,
-        model_version: str = Input(
-            description="Model to use for generation. If the model is fine-tuned from MusicGen, then only `finetuned` will work in the newly created fine-tuned model repository.",
-            default="medium",
-            choices=["melody", "small", "medium", "large", "encode-decode", "finetuned"],
-        ),
+        # model_version: str = Input(
+        #     description="Model to use for generation. If the model is fine-tuned from MusicGen, then only `finetuned` will work in the newly created fine-tuned model repository.",
+        #     default="medium",
+        #     choices=["melody", "small", "medium", "large", "encode-decode", "finetuned"],
+        # ),
         prompt: str = Input(
             description="A description of the music you want to generate.", default=None
         ),
@@ -187,44 +192,46 @@ class Predictor(BasePredictor):
             raise ValueError("Must provide either prompt or input_audio")
         if continuation and not input_audio:
             raise ValueError("Must provide `input_audio` if continuation is `True`.")
-        if model_version == "large" and input_audio and not continuation:
-            raise ValueError(
-                "Large model does not support melody input. Set `model_version='melody'` to condition on audio input."
-            )
-        elif model_version == "medium" and input_audio and not continuation:
-            raise ValueError(
-                "Medium model does not support melody input. Set `model_version='melody'` to condition on audio input."
-            )
-        elif model_version == "small" and input_audio and not continuation:
-            raise ValueError(
-                "Small model does not support melody input. Set `model_version='melody'` to condition on audio input."
-            )
-        elif model_version == "finetuned":
-            try:
-                self.my_model
-            except:
-                raise NameError(
-                    "There is no fine-tuned 'weight' file found. Is the model page you are running with is created from additional training process?"
-                )
-        elif model_version != "finetuned":
-            try:
-                self.my_model
-                raise NameError(
-                    "You must set `model_version` value as `finetuned`, when the model is fine-tuned from MusicGen."
-                )
-            except:
-                pass
+        # if model_version == "large" and input_audio and not continuation:
+        #     raise ValueError(
+        #         "Large model does not support melody input. Set `model_version='melody'` to condition on audio input."
+        #     )
+        # elif model_version == "medium" and input_audio and not continuation:
+        #     raise ValueError(
+        #         "Medium model does not support melody input. Set `model_version='melody'` to condition on audio input."
+        #     )
+        # elif model_version == "small" and input_audio and not continuation:
+        #     raise ValueError(
+        #         "Small model does not support melody input. Set `model_version='melody'` to condition on audio input."
+        #     )
+        # elif model_version == "finetuned":
+        #     try:
+        #         self.my_model
+        #     except:
+        #         raise NameError(
+        #             "There is no fine-tuned 'weight' file found. Is the model page you are running with is created from additional training process?"
+        #         )
+        # elif model_version != "finetuned":
+        #     try:
+        #         self.my_model
+        #         raise NameError(
+        # #             "You must set `model_version` value as `finetuned`, when the model is fine-tuned from MusicGen."
+        # #         )
+        #     except:
+        #         pass
 
-        if model_version == "melody":
-            model = self.melody_model
-        elif model_version == "large":
-            model = self.large_model
-        elif model_version == "medium":
-            model = self.medium_model
-        elif model_version == "small":
-            model = self.small_model
-        elif model_version == "finetuned":
-            model = self.my_model
+        # if model_version == "melody":
+        #     model = self.melody_model
+        # elif model_version == "large":
+        #     model = self.large_model
+        # elif model_version == "medium":
+        #     model = self.medium_model
+        # elif model_version == "small":
+        #     model = self.small_model
+        # elif model_version == "finetuned":
+        #     model = self.my_model
+
+        model = self.model
 
         set_generation_params = lambda duration: model.set_generation_params(
             duration=duration,
@@ -244,10 +251,10 @@ class Predictor(BasePredictor):
             set_generation_params(duration)
             wav = model.generate([prompt], progress=True)
 
-        elif model_version == "encode-decode":
-            encoded_audio = self._preprocess_audio(input_audio, model)
-            set_generation_params(duration)
-            wav = model.compression_model.decode(encoded_audio).squeeze(0)
+        # elif model_version == "encode-decode":
+        #     encoded_audio = self._preprocess_audio(input_audio, model)
+        #     set_generation_params(duration)
+        #     wav = model.compression_model.decode(encoded_audio).squeeze(0)
 
         else:
             input_audio, sr = torchaudio.load(input_audio)
@@ -310,39 +317,39 @@ class Predictor(BasePredictor):
 
         return Path(path)
 
-    def _preprocess_audio(
-        audio_path, model: MusicGen, duration: tp.Optional[int] = None
-    ):
+    # def _preprocess_audio(
+    #     audio_path, model: MusicGen, duration: tp.Optional[int] = None
+    # ):
 
-        wav, sr = torchaudio.load(audio_path)
-        wav = torchaudio.functional.resample(wav, sr, model.sample_rate)
-        wav = wav.mean(dim=0, keepdim=True)
+    #     wav, sr = torchaudio.load(audio_path)
+    #     wav = torchaudio.functional.resample(wav, sr, model.sample_rate)
+    #     wav = wav.mean(dim=0, keepdim=True)
 
-        # Calculate duration in seconds if not provided
-        if duration is None:
-            duration = wav.shape[1] / model.sample_rate
+    #     # Calculate duration in seconds if not provided
+    #     if duration is None:
+    #         duration = wav.shape[1] / model.sample_rate
 
-        # Check if duration is more than 30 seconds
-        if duration > 30:
-            raise ValueError("Duration cannot be more than 30 seconds")
+    #     # Check if duration is more than 30 seconds
+    #     if duration > 30:
+    #         raise ValueError("Duration cannot be more than 30 seconds")
 
-        end_sample = int(model.sample_rate * duration)
-        wav = wav[:, :end_sample]
+    #     end_sample = int(model.sample_rate * duration)
+    #     wav = wav[:, :end_sample]
 
-        assert wav.shape[0] == 1
-        assert wav.shape[1] == model.sample_rate * duration
+    #     assert wav.shape[0] == 1
+    #     assert wav.shape[1] == model.sample_rate * duration
 
-        wav = wav.cuda()
-        wav = wav.unsqueeze(1)
+    #     wav = wav.cuda()
+    #     wav = wav.unsqueeze(1)
 
-        with torch.no_grad():
-            gen_audio = model.compression_model.encode(wav)
+    #     with torch.no_grad():
+    #         gen_audio = model.compression_model.encode(wav)
 
-        codes, scale = gen_audio
+    #     codes, scale = gen_audio
 
-        assert scale is None
+    #     assert scale is None
 
-        return codes
+    #     return codes
 
 
 # From https://gist.github.com/gatheluck/c57e2a40e3122028ceaecc3cb0d152ac

@@ -17,6 +17,7 @@ build:
     - libtag1-dev>=1.9
     - libchromaprint-dev
     - numactl
+    - sox
     # - "libgl1-mesa-glx"
     # - "libglib2.0-0"
 
@@ -53,8 +54,8 @@ build:
     - "essentia-tensorflow"
 
   # commands run after the environment is setup
-  # run:
-    # - pip install -U essentia-tensorflow
+  run:
+    - python3 -m pip install -U git+https://github.com/facebookresearch/demucs#egg=demucs
   
 # predict.py defines how predictions are run on your model
 predict: "predict.py:Predictor"
