@@ -23,14 +23,19 @@ from zipfile import ZipFile
 import shutil
 import subprocess as sp
 
-import dora
 from dora import git_save
 from dora.distrib import init
-import flashy
-import hydra
-import omegaconf
 
 import tarfile
+        # CUDA_VISIBLE_DEVICES = ','.join([str(i) for i in range(torch.cuda.device_count())])
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+        
+from essentia.standard import (
+    MonoLoader, 
+    TensorflowPredictEffnetDiscogs, 
+    TensorflowPredict2D,
+)
+os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2,3,4,5,6,7'
 
 import torch
 
@@ -52,7 +57,11 @@ def prepare_data(
         one_same_description: str = None,
         meta_path: str = 'src/meta',
         auto_labeling: bool = True):
-    # decompress file at dataset_path
+    
+    d_path = Path(target_path)
+    d_path.mkdir(exist_ok=True, parents=True)
+
+    # Decompressing file at dataset_path
     if str(dataset_path).rsplit('.', 1)[1] == 'zip':
         subprocess.run(['unzip', str(dataset_path), '-d', target_path + '/'])
     elif str(dataset_path).rsplit('.', 1)[1] == 'tar':
@@ -62,10 +71,11 @@ def prepare_data(
     elif str(dataset_path).rsplit('.', 1)[1] == 'tgz':
         subprocess.run(['tar', '-xzvf', str(dataset_path), '-C', target_path + '/'])
     elif str(dataset_path).rsplit('.', 1)[1] in ['wav', 'mp3', 'flac']:
-        os.move(str(dataset_path), target_path + '/' + str(dataset_path.name))
+        os.rename(str(dataset_path), target_path + '/' + str(dataset_path.name))
     else:
         raise Exception("Not supported compression file type. The file type should be one of 'zip', 'tar', 'tar.gz', 'tgz' types of compression file, or a single 'wav', 'mp3', 'flac' types of audio file.")
     
+    # Chuking audio files into 30sec chunks / Resampling to 44100hz
     from pydub import AudioSegment
     
     for filename in os.listdir(target_path):
@@ -79,38 +89,167 @@ def prepare_data(
             # split into 30-second chunks
             for i in range(0, len(audio), 30000):
                 chunk = audio[i:i+30000]
-                chunk.export(f"{target_path + '/' + filename[:-4]}_chunk{i//1000}.wav", format="wav")
+                if len(chunk)==30000:
+                    chunk.export(f"{target_path + '/' + filename[:-4]}_chunk{i//1000}.wav", format="wav")
             os.remove(target_path + '/' + filename)
 
-    import json
-    import audiocraft.data.audio_dataset
-
-    meta = audiocraft.data.audio_dataset.find_audio_files(target_path, audiocraft.data.audio_dataset.DEFAULT_EXTS, progress=True, resolve=False, minimal=True, workers=10)
     max_sample_rate = 0
-    for m in meta:
-        if m.sample_rate > max_sample_rate:
-            max_sample_rate = m.sample_rate
-        fdict = {
-            "key": "",
-            "artist": "",
-            "sample_rate": m.sample_rate,
-            "file_extension": m.path.rsplit('.', 1)[1],
-            "description": "",
-            "keywords": "",
-            "duration": m.duration,
-            "bpm": "",
-            "genre": "",
-            "title": "",
-            "name": Path(m.path).name.rsplit('.', 1)[0],
-            "instrument": "",
-            "moods": []
-        }
-        with open(m.path.rsplit('.', 1)[0] + '.json', "w") as file:
-            json.dump(fdict, file)
-    audiocraft.data.audio_dataset.save_audio_meta(meta_path + '/data.jsonl', meta)
+    import json
     
-    d_path = Path(target_path)
-    d_path.mkdir(exist_ok=True, parents=True)
+    # Auto Labeling
+    if auto_labeling:
+        sp.call(["curl", "https://essentia.upf.edu/models/classification-heads/genre_discogs400/genre_discogs400-discogs-effnet-1.pb", "--output", "genre_discogs400-discogs-effnet-1.pb"])
+        sp.call(["curl", "https://essentia.upf.edu/models/feature-extractors/discogs-effnet/discogs-effnet-bs64-1.pb", "--output", "discogs-effnet-bs64-1.pb"])
+        sp.call(["curl", "https://essentia.upf.edu/models/classification-heads/mtg_jamendo_moodtheme/mtg_jamendo_moodtheme-discogs-effnet-1.pb", "--output", "mtg_jamendo_moodtheme-discogs-effnet-1.pb"])
+        sp.call(["curl", "https://essentia.upf.edu/models/classification-heads/mtg_jamendo_instrument/mtg_jamendo_instrument-discogs-effnet-1.pb", "--output", "mtg_jamendo_instrument-discogs-effnet-1.pb"])
+        
+
+        from metadata import genre_labels, mood_theme_classes, instrument_classes
+        import numpy as np
+        
+        # For auto_labeling
+        def filter_predictions(predictions, class_list, threshold=0.1):
+            predictions_mean = np.mean(predictions, axis=0)
+            sorted_indices = np.argsort(predictions_mean)[::-1]
+            filtered_indices = [i for i in sorted_indices if predictions_mean[i] > threshold]
+            filtered_labels = [class_list[i] for i in filtered_indices]
+            filtered_values = [predictions_mean[i] for i in filtered_indices]
+            return filtered_labels, filtered_values
+
+        def make_comma_separated_unique(tags):
+            seen_tags = set()
+            result = []
+            for tag in ', '.join(tags).split(', '):
+                if tag not in seen_tags:
+                    result.append(tag)
+                    seen_tags.add(tag)
+            return ', '.join(result)
+
+        def get_audio_features(audio_filename):
+            audio = MonoLoader(filename=audio_filename, sampleRate=16000, resampleQuality=4)()
+            embedding_model = TensorflowPredictEffnetDiscogs(graphFilename="discogs-effnet-bs64-1.pb", output="PartitionedCall:1")
+            embeddings = embedding_model(audio)
+
+            result_dict = {}
+
+            # predict genres
+            genre_model = TensorflowPredict2D(graphFilename="genre_discogs400-discogs-effnet-1.pb", input="serving_default_model_Placeholder", output="PartitionedCall:0")
+            predictions = genre_model(embeddings)
+            filtered_labels, _ = filter_predictions(predictions, genre_labels)
+            filtered_labels = ', '.join(filtered_labels).replace("---", ", ").split(', ')
+            result_dict['genres'] = make_comma_separated_unique(filtered_labels)
+
+            # predict mood/theme
+            mood_model = TensorflowPredict2D(graphFilename="mtg_jamendo_moodtheme-discogs-effnet-1.pb")
+            predictions = mood_model(embeddings)
+            filtered_labels, _ = filter_predictions(predictions, mood_theme_classes, threshold=0.05)
+            result_dict['moods'] = make_comma_separated_unique(filtered_labels)
+
+            # predict instruments
+            instrument_model = TensorflowPredict2D(graphFilename="mtg_jamendo_instrument-discogs-effnet-1.pb")
+            predictions = instrument_model(embeddings)
+            filtered_labels, _ = filter_predictions(predictions, instrument_classes)
+            result_dict['instruments'] = filtered_labels
+
+            return result_dict
+
+        train_len = 0
+        # eval_len = 0
+        from tqdm import tqdm
+        import librosa
+
+        os.mkdir(meta_path)
+        with open(meta_path + "/data.jsonl", "w") as train_file:#, \
+            # open("/content/audiocraft/egs/eval/data.jsonl", "w") as eval_file:
+            files = os.listdir(target_path)
+            for filename in tqdm(files):
+                result = get_audio_features(os.path.join(target_path, filename))
+                # TODO: make openai call, populate description and keywords
+
+                # get key and BPM
+                y, sr = librosa.load(os.path.join(target_path, filename))
+                tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+                tempo = round(tempo) # not usually accurate lol
+                chroma = librosa.feature.chroma_stft(y=y, sr=sr)
+                key = np.argmax(np.sum(chroma, axis=1))
+                key = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'][key]
+                length = librosa.get_duration(y=y, sr=sr)
+                # print(f"{filename}: {result}, detected key {key}, detected bpm {tempo}")
+
+                sr = librosa.get_samplerate(os.path.join(target_path, filename))
+                if sr > max_sample_rate:
+                    max_sample_rate = sr
+                # THIS IS FOR MY OWN DATASET FORMAT
+                # Meant strictly to extract from format: "artist name 4_chunk25.wav"
+                # Modify for your own use!!
+                # def extract_artist_from_filename(filename):
+                #     match = re.search(r'(.+?)\s\d+_chunk\d+\.wav', filename)
+                #     artist = match.group(1) if match else ""
+                #     return artist.replace("mix", "").strip() if "mix" in artist else artist
+                # artist_name = extract_artist_from_filename(filename)
+                artist_name = ""
+
+                # populate json
+                entry = {
+                    "key": f"{key}",
+                    "artist": artist_name,
+                    "sample_rate": sr,
+                    "file_extension": "wav",
+                    "description": "",
+                    "keywords": "",
+                    "duration": length,
+                    "bpm": tempo,
+                    "genre": result.get('genres', ""),
+                    "title": "",
+                    "name": "",
+                    "instrument": result.get('instruments', ""),
+                    "moods": result.get('moods', []),
+                    "path": os.path.join(target_path, filename),
+                }
+                with open(os.path.join(target_path, filename).rsplit('.', 1)[0] + '.json', "w") as file:
+                    json.dump(entry, file)
+                print(entry)
+
+                # train/test split
+                # if random.random() < 0.85:
+                train_len += 1
+                train_file.write(json.dumps(entry) + '\n')
+                # else:
+                #     eval_len += 1
+                #     eval_file.write(json.dumps(entry) + '\n')
+            from numba import cuda
+            device = cuda.get_current_device()
+            device.reset()
+
+            filelen = len(files)
+    else:
+        import audiocraft.data.audio_dataset
+        
+        meta = audiocraft.data.audio_dataset.find_audio_files(target_path, audiocraft.data.audio_dataset.DEFAULT_EXTS, progress=True, resolve=False, minimal=True, workers=10)
+
+        for m in meta:
+            if m.sample_rate > max_sample_rate:
+                max_sample_rate = m.sample_rate
+            fdict = {
+                "key": "",
+                "artist": "",
+                "sample_rate": m.sample_rate,
+                "file_extension": m.path.rsplit('.', 1)[1],
+                "description": "",
+                "keywords": "",
+                "duration": m.duration,
+                "bpm": "",
+                "genre": "",
+                "title": "",
+                "name": Path(m.path).name.rsplit('.', 1)[0],
+                "instrument": "",
+                "moods": []
+            }
+            with open(m.path.rsplit('.', 1)[0] + '.json', "w") as file:
+                json.dump(fdict, file)
+        audiocraft.data.audio_dataset.save_audio_meta(meta_path + '/data.jsonl', meta)
+        filelen = len(meta)
+
     audios = list(d_path.rglob('*.mp3')) + list(d_path.rglob('*.wav'))
 
     for audio in list(audios):
@@ -118,23 +257,26 @@ def prepare_data(
         fdict = json.load(jsonf)
         jsonf.close()
         
-        assert Path(str(audio).rsplit('.', 1)[0] + '.txt').exists() or one_same_description is not None
+        assert Path(str(audio).rsplit('.', 1)[0] + '.txt').exists() or Path(str(audio).rsplit('_chunk', 1)[0] + '.txt').exists() or one_same_description is not None
 
-        if one_same_description is not None:
-            fdict["description"] = one_same_description
-        else:
-            f = open(str(audio).rsplit('.', 1)[0] + '.txt', 'r')
+        if one_same_description is None:
+            if Path(str(audio).rsplit('.', 1)[0] + '.txt').exists():
+                f = open(str(audio).rsplit('.', 1)[0] + '.txt', 'r')
+            else:
+                f = open(str(audio).rsplit('_chunk', 1)[0] + '.txt', 'r')
             line = f.readline()
             f.close()
             fdict["description"] = line
+        else:
+            fdict["description"] = one_same_description
 
         with open(str(audio).rsplit('.', 1)[0] + '.json', "w") as file:
             json.dump(fdict, file)
 
-    return max_sample_rate, len(meta)
+    return max_sample_rate, filelen
 
 def train(
-        dataset_path: Path = Input("Path to dataset directory. Input audio files will be chunked into multiple 30 second audio files. Must be one of 'tar', 'tar.gz', 'gz', 'zip' types of compressed file, or a single 'wav', 'mp3', 'flac' file.",),
+        dataset_path: Path = Input("Path to dataset directory. Input audio files will be chunked into multiple 30 second audio files. Must be one of 'tar', 'tar.gz', 'gz', 'zip' types of compressed file, or a single 'wav', 'mp3', 'flac' file. Audio files must be longer than 30 seconds.",),
         auto_labeling: bool = Input(description="Creating label data like genre, mood, theme, instrumentation, key, bpm for each track. Using `essentia-tensorflow` for music information retrieval.", default=True),
         one_same_description: str = Input(description="A description for all of audio data", default=None),
         model_version: str = Input(description="Model version to train.", default="small", choices=["melody", "small", "medium"]),
@@ -151,6 +293,20 @@ def train(
     meta_path = 'src/meta'
     target_path = 'src/train_data'
     
+    out_path = "trained_model.tar"
+
+    # Remove previous training's leftover
+    if os.path.isfile(out_path):
+        os.remove(out_path)
+
+    import shutil
+    if os.path.isdir(meta_path):
+        shutil.rmtree(meta_path)
+    if os.path.isdir(target_path):
+        shutil.rmtree(target_path)
+    if os.path.isdir('tmp'):
+        shutil.rmtree('tmp')
+
     max_sample_rate, len_dataset = prepare_data(dataset_path, target_path, one_same_description, meta_path, auto_labeling)
 
     # cfg = omegaconf.OmegaConf.load("flatconfig_" + model_version + ".yaml")
@@ -230,10 +386,6 @@ def train(
             checkpoint_dir = os.path.join(dirpath, filename)
     
     loaded = torch.load(checkpoint_dir)
-    out_path = "trained_model.tar"
-
-    if os.path.isfile(out_path):
-        os.remove(out_path)
 
     torch.save({'xp.cfg': loaded["xp.cfg"], "model": loaded["model"]}, out_path)
     # print(directory.parent)
@@ -252,19 +404,6 @@ def train(
     #         print(file_path)
     #         zip.write(file_path, arcname=file_path.relative_to(directory))
 
-    import shutil
-    shutil.rmtree('src/meta')
-    shutil.rmtree('src/train_data')
-    shutil.rmtree('tmp')
-
+    
     return TrainingOutput(weights=Path(out_path))
 
-# main.dora.dir = AudioCraftEnvironment.get_dora_dir()
-# main._base_cfg.slurm = get_slurm_parameters(main._base_cfg.slurm)
-
-# if main.dora.shared is not None and not os.access(main.dora.shared, os.R_OK):
-#     print("No read permission on dora.shared folder, ignoring it.", file=sys.stderr)
-#     main.dora.shared = None
-
-# if __name__ == '__main__':
-    #pp()

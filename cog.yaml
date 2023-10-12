@@ -10,6 +10,13 @@ build:
   system_packages:
     - ffmpeg
     - unzip
+    - build-essential
+    - libeigen3-dev
+    - libyaml-dev
+    - libfftw3-dev
+    - libtag1-dev>=1.9
+    - libchromaprint-dev
+    - numactl
     # - "libgl1-mesa-glx"
     # - "libglib2.0-0"
 
@@ -42,11 +49,12 @@ build:
     - "protobuf"
     - "tensorboard>=1.15"
     - "pydub"
-  
+    - "numba"
+    - "essentia-tensorflow"
+
   # commands run after the environment is setup
   # run:
-  #   - "apt-get update && apt-get install -y ffmpeg"
-  #   - "apt-get install unzip"
+    # - pip install -U essentia-tensorflow
   
 # predict.py defines how predictions are run on your model
 predict: "predict.py:Predictor"
