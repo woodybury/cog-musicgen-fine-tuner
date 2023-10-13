@@ -127,7 +127,7 @@ cog train -i dataset_path=@<path-to-your-data> <additional hyperparameters>
 - For 8 GPU multiprocessing, `batch_size` must be a multiple of 8. Otherwise, `batch_size` will be automatically set to the nearest multiple of 8.
 - For the `medium` model, the maximum `batch_size` is `8` with the specified 8 x Nvidia A40 machine setting.
 
-## Example Code
+## Example Code with Replicate API
 ```python
 import replicate
 
