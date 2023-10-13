@@ -45,7 +45,7 @@ git clone https://github.com/sakemin/cog-musicgen-fine-tuner
 To run the model, you need a local copy of the model's Docker image. You can satisfy this requirement by specifying the image ID in your call to `predict` like:
 
 ```
-cog predict r8.im/sakemin/musicgen-fine-tuner@sha256:aa4abfe6774b6c14f7835cbd284c0a55cec095ea4ae956493af28a52d00643b6 -i description="tense staccato strings. plucked strings. dissonant. scary movie." -i duration=8
+cog predict r8.im/sakemin/musicgen-fine-tuner@sha256:aa4abfe6774b6c14f7835cbd284c0a55cec095ea4ae956493af28a52d00643b6 -i prompt="tense staccato strings. plucked strings. dissonant. scary movie." -i duration=8
 ```
 
 For more information, see the Cog section [here](https://replicate.com/sakemin/musicgen-fine-tuner/api#run)
