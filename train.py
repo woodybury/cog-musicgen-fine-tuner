@@ -10,25 +10,14 @@ See more info on how to use dora: https://github.com/facebookresearch/dora
 """
 
 import logging
-import multiprocessing
 import os
 import os.path
-import sys
-import typing as tp
 
 import subprocess
-import datetime 
 from cog import BaseModel, Input, Path
-from zipfile import ZipFile
-import shutil
 import subprocess as sp
 from tqdm import tqdm
 
-from dora import git_save
-from dora.distrib import init
-
-import tarfile
-        # CUDA_VISIBLE_DEVICES = ','.join([str(i) for i in range(torch.cuda.device_count())])
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
         
 from essentia.standard import (
@@ -39,9 +28,6 @@ from essentia.standard import (
 os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2,3,4,5,6,7'
 
 import torch
-
-from audiocraft.environment import AudioCraftEnvironment
-from audiocraft.utils.cluster import get_slurm_parameters
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s", level=logging.INFO, datefmt="%Y-%m-%d %H:%M:%S"
@@ -80,6 +66,7 @@ def prepare_data(
     # Audio Chunking and Vocal Dropping
 
     from pydub import AudioSegment
+
     if drop_vocals:
         import demucs.api
         import torchaudio
@@ -97,16 +84,16 @@ def prepare_data(
             
 
             # Chuking audio files into 30sec chunks
-
             audio = AudioSegment.from_file(target_path + '/' + filename)
-            audio = audio.set_frame_rate(44100) # resample to 44100
+
+            audio = audio.set_frame_rate(44100) # Resampling to 44100
 
             print('Chunking ' + filename)
             
-            # split into 30-second chunks
+            # Splitting the audio files into 30-second chunks
             for i in range(0, len(audio), 30000):
-                chunk = audio[i:i+30000]
-                if len(chunk)==30000:
+                chunk = audio[i:i + 30000]
+                if len(chunk) == 30000: # Omitting residuals with <30sec duration
                     chunk.export(f"{target_path + '/' + filename[:-4]}_chunk{i//1000}.wav", format="wav")
             os.remove(target_path + '/' + filename)
 
@@ -124,7 +111,6 @@ def prepare_data(
         from metadata import genre_labels, mood_theme_classes, instrument_classes
         import numpy as np
         
-        # For auto_labeling
         def filter_predictions(predictions, class_list, threshold=0.1):
             predictions_mean = np.mean(predictions, axis=0)
             sorted_indices = np.argsort(predictions_mean)[::-1]
@@ -149,20 +135,20 @@ def prepare_data(
 
             result_dict = {}
 
-            # predict genres
+            # Predicting genres
             genre_model = TensorflowPredict2D(graphFilename="genre_discogs400-discogs-effnet-1.pb", input="serving_default_model_Placeholder", output="PartitionedCall:0")
             predictions = genre_model(embeddings)
             filtered_labels, _ = filter_predictions(predictions, genre_labels)
             filtered_labels = ', '.join(filtered_labels).replace("---", ", ").split(', ')
             result_dict['genres'] = make_comma_separated_unique(filtered_labels)
 
-            # predict mood/theme
+            # Predicting mood/theme
             mood_model = TensorflowPredict2D(graphFilename="mtg_jamendo_moodtheme-discogs-effnet-1.pb")
             predictions = mood_model(embeddings)
             filtered_labels, _ = filter_predictions(predictions, mood_theme_classes, threshold=0.05)
             result_dict['moods'] = make_comma_separated_unique(filtered_labels)
 
-            # predict instruments
+            # Predicting instruments
             instrument_model = TensorflowPredict2D(graphFilename="mtg_jamendo_instrument-discogs-effnet-1.pb")
             predictions = instrument_model(embeddings)
             filtered_labels, _ = filter_predictions(predictions, instrument_classes)
@@ -171,41 +157,29 @@ def prepare_data(
             return result_dict
 
         train_len = 0
-        # eval_len = 0
         import librosa
 
         os.mkdir(meta_path)
-        with open(meta_path + "/data.jsonl", "w") as train_file:#, \
-            # open("/content/audiocraft/egs/eval/data.jsonl", "w") as eval_file:
+        with open(meta_path + "/data.jsonl", "w") as train_file:
             files = os.listdir(target_path)
             for filename in tqdm(files):
                 result = get_audio_features(os.path.join(target_path, filename))
-                # TODO: make openai call, populate description and keywords
 
-                # get key and BPM
+                # Obtaining key and BPM
                 y, sr = librosa.load(os.path.join(target_path, filename))
                 tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
-                tempo = round(tempo) # not usually accurate lol
+                tempo = round(tempo)
                 chroma = librosa.feature.chroma_stft(y=y, sr=sr)
                 key = np.argmax(np.sum(chroma, axis=1))
                 key = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'][key]
                 length = librosa.get_duration(y=y, sr=sr)
-                # print(f"{filename}: {result}, detected key {key}, detected bpm {tempo}")
 
                 sr = librosa.get_samplerate(os.path.join(target_path, filename))
                 if sr > max_sample_rate:
                     max_sample_rate = sr
-                # THIS IS FOR MY OWN DATASET FORMAT
-                # Meant strictly to extract from format: "artist name 4_chunk25.wav"
-                # Modify for your own use!!
-                # def extract_artist_from_filename(filename):
-                #     match = re.search(r'(.+?)\s\d+_chunk\d+\.wav', filename)
-                #     artist = match.group(1) if match else ""
-                #     return artist.replace("mix", "").strip() if "mix" in artist else artist
-                # artist_name = extract_artist_from_filename(filename)
+
                 artist_name = ""
 
-                # populate json
                 entry = {
                     "key": f"{key}",
                     "artist": artist_name,
@@ -226,13 +200,9 @@ def prepare_data(
                     json.dump(entry, file)
                 print(entry)
 
-                # train/test split
-                # if random.random() < 0.85:
                 train_len += 1
                 train_file.write(json.dumps(entry) + '\n')
-                # else:
-                #     eval_len += 1
-                #     eval_file.write(json.dumps(entry) + '\n')
+
             from numba import cuda
             device = cuda.get_current_device()
             device.reset()
@@ -315,7 +285,7 @@ def train(
     
     out_path = "trained_model.tar"
 
-    # Remove previous training's leftover
+    # Removing previous training's leftover
     if os.path.isfile(out_path):
         os.remove(out_path)
 
@@ -328,28 +298,6 @@ def train(
         shutil.rmtree('tmp')
 
     max_sample_rate, len_dataset = prepare_data(dataset_path, target_path, one_same_description, meta_path, auto_labeling, drop_vocals)
-
-    # cfg = omegaconf.OmegaConf.load("flatconfig_" + model_version + ".yaml")
-        
-    # cfg.datasource.max_sample_rate = max_sample_rate
-    # cfg.datasource.train = meta_path
-    # cfg.dataset.train.num_samples = len_dataset
-    # cfg.optim.epochs = epochs
-    # cfg.optim.lr = lr
-    # cfg.schedule.lr_scheduler = lr_scheduler
-    # cfg.schedule.cosine.warmup = warmup
-    # cfg.schedule.polynomial_decay.warmup = warmup
-    # cfg.schedule.inverse_sqrt.warmup = warmup
-    # cfg.schedule.linear_warmup.warmup = warmup
-    # cfg.classifier_free_guidance.training_dropout = cfg_p
-    # cfg.logging.log_updates = updates_per_epoch//10
-    # cfg.dataset.batch_size = batch_size
-    # if updates_per_epoch is None:
-    #     cfg.dataset.train.permutation_on_files = False
-    #     cfg.optim.updates_per_epoch = 1
-    # else:
-    #     cfg.dataset.train.permutation_on_files = True
-    #     cfg.optim.updates_per_epoch = updates_per_epoch
 
     if model_version == "medium":
         batch_size = 8
@@ -396,10 +344,7 @@ def train(
         args.append("dataset.train.permutation_on_files=True")
         args.append(f"optim.updates_per_epoch={updates_per_epoch}")
 
-    # dora_main.main(args)
     sp.call(["dora"]+args)
-    # directory = Path(output_dir)
-    # directory = Path(str(solver.checkpoint_path()))
 
     for dirpath, dirnames, filenames in os.walk("tmp"):
         for filename in [f for f in filenames if f == "checkpoint.th"]:
@@ -408,22 +353,6 @@ def train(
     loaded = torch.load(checkpoint_dir, map_location=torch.device('cpu'))
 
     torch.save({'xp.cfg': loaded["xp.cfg"], "model": loaded["model"]}, out_path)
-    # print(directory.parent)
-    # print(directory.name)
-    
-    # serializer = TensorSerializer(MODEL_OUT)
-    # serializer.write_module(solver.model)
-    # serializer.close()
-
-    # with tarfile.open(out_path, "w") as tar:
-    #     tar.add(directory, arcname=directory.name)
-
-    # out_path = "training_output.zip"
-    # with ZipFile(out_path, "w") as zip:
-    #     for file_path in directory.rglob("*"):
-    #         print(file_path)
-    #         zip.write(file_path, arcname=file_path.relative_to(directory))
-
     
     return TrainingOutput(weights=Path(out_path))
 
