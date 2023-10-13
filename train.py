@@ -273,16 +273,19 @@ def prepare_data(
         fdict = json.load(jsonf)
         jsonf.close()
         
-        assert Path(str(audio).rsplit('.', 1)[0] + '.txt').exists() or Path(str(audio).rsplit('_chunk', 1)[0] + '.txt').exists() or one_same_description is not None
+        # assert Path(str(audio).rsplit('.', 1)[0] + '.txt').exists() or Path(str(audio).rsplit('_chunk', 1)[0] + '.txt').exists() or one_same_description is not None
 
         if one_same_description is None:
             if Path(str(audio).rsplit('.', 1)[0] + '.txt').exists():
                 f = open(str(audio).rsplit('.', 1)[0] + '.txt', 'r')
-            else:
+                line = f.readline()
+                f.close()
+                fdict["description"] = line
+            elif Path(str(audio).rsplit('_chunk', 1)[0] + '.txt').exists():
                 f = open(str(audio).rsplit('_chunk', 1)[0] + '.txt', 'r')
-            line = f.readline()
-            f.close()
-            fdict["description"] = line
+                line = f.readline()
+                f.close()
+                fdict["description"] = line
         else:
             fdict["description"] = one_same_description
 
@@ -299,7 +302,7 @@ def train(
         model_version: str = Input(description="Model version to train.", default="small", choices=["melody", "small", "medium"]),
         epochs: int = Input(description="Number of epochs to train for", default=3),
         updates_per_epoch: int = Input(description="Number of iterations for one epoch", default=100),
-        batch_size: int = Input(description="Batch size. Must be multiple of 8(number of gpus), for 8-gpu training.", default=20),
+        batch_size: int = Input(description="Batch size. Must be multiple of 8(number of gpus), for 8-gpu training.", default=16),
         optimizer: str = Input(description="Type of optimizer.", default='dadam', choices=["dadam", "adamw"]),
         lr: float = Input(description="Learning rate", default=1),
         lr_scheduler: str = Input(description="Type of lr_scheduler", default="cosine", choices=["exponential", "cosine", "polynomial_decay", "inverse_sqrt", "linear_warmup"]),
@@ -402,7 +405,7 @@ def train(
         for filename in [f for f in filenames if f == "checkpoint.th"]:
             checkpoint_dir = os.path.join(dirpath, filename)
     
-    loaded = torch.load(checkpoint_dir)
+    loaded = torch.load(checkpoint_dir, map_location=torch.device('cpu'))
 
     torch.save({'xp.cfg': loaded["xp.cfg"], "model": loaded["model"]}, out_path)
     # print(directory.parent)
