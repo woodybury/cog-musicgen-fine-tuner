@@ -1,4 +1,4 @@
-# Cog implementation of MusicGen with Fine-tuner
+# Cog Implementation of MusicGen with Fine-tuner
 [![Replicate](https://replicate.com/sakemin/musicgen-fine-tuner/badge)](https://replicate.com/sakemin/musicgen-fine-tuner) 
 
 [MusicGen](https://replicate.com/meta/musicgen) represents a straightforward and manageable model designed for music generation, as described in [this research paper](https://arxiv.org/abs/2306.05284). This model allows users to refine MusicGen using their own datasets.
