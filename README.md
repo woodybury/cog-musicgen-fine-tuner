@@ -156,6 +156,5 @@ print(training)
 - Vocal dropping is implemented using Meta's [`demucs`](https://github.com/facebookresearch/demucs).
 ## Licenses
 - All code in this repository is licensed under the [Apache License 2.0 license](https://github.com/sakemin/cog-musicgen-fine-tuner/blob/main/LICENSE).
-- The weights in [this repository](https://github.com/sakemin/cog-musicgen-fine-tuner) repository are released under the CC-BY-NC 4.0 license as found in the [LICENSE_weights file](https://github.com/sakemin/cog-musicgen-fine-tuner/blob/main/LICENSE_weights).
 - The code in the [Audiocraft](https://github.com/facebookresearch/audiocraft) repository is released under the MIT license (see [LICENSE file](https://github.com/facebookresearch/audiocraft/blob/main/LICENSE)).
 - The weights in the [Audiocraft](https://github.com/facebookresearch/audiocraft) repository are released under the CC-BY-NC 4.0 license (see [LICENSE_weights file](https://github.com/facebookresearch/audiocraft/blob/main/LICENSE_weights)).
