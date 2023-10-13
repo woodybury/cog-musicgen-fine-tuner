@@ -53,7 +53,7 @@ For more information, see the Cog section [here](https://replicate.com/sakemin/m
 Alternatively, you can build the image yourself, either by running `cog build` or by letting `cog predict` trigger the build process implicitly. For example, the following will trigger the build process and then execute prediction: 
 
 ```
-cog predict -i description="tense staccato strings. plucked strings. dissonant. scary movie." -i duration=8
+cog predict -i prompt="tense staccato strings. plucked strings. dissonant. scary movie." -i duration=8
 ```
 
 Note, the first time you run `cog predict`, model weights and other requisite assets will be downloaded if they're not available locally. This download only needs to be executed once.
@@ -65,7 +65,7 @@ Note, the first time you run `cog predict`, model weights and other requisite as
 If you haven't already, you should ensure that your model runs locally with `cog predict`. This will guarantee that all assets are accessible. E.g., run: 
 
 ```
-cog predict -i description=tense staccato strings. plucked strings. dissonant. scary movie. -i duration=8
+cog predict -i prompt=tense staccato strings. plucked strings. dissonant. scary movie. -i duration=8
 ```
 
 ## Step 2. Create a model on Replicate.
