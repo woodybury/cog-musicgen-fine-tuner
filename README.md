@@ -10,6 +10,11 @@ For more information about this model, see [here](https://github.com/facebookres
 
 You can demo this model or learn how to use it with Replicate's API [here](https://replicate.com/sakemin/musicgen-fine-tuner). 
 
+## Prediction
+### Default Model
+- In this repository, the default prediction model is configured as the melody model.
+- After completing the fine-tuning process from this repository, the trained model weights will be loaded into your own model repository on Replicate.
+
 # Run with Cog
 
 [Cog](https://github.com/replicate/cog) is an open-source tool that packages machine learning models in a standard, production-ready container. 
