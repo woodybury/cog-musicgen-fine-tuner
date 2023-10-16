@@ -317,13 +317,13 @@ class Predictor(BasePredictor):
                         f"input_audio duration({continuation_end - continuation_start}) must be < 30 seconds. Use `continuation_start` and `continuation_end` to trim the input_audio out."
                     )
 
-                audio_chords = audio_chords[
+                input_audio = input_audio[
                     ..., int(sr * continuation_start) : int(sr * continuation_end)
                 ]
 
                 print(f"Step 1/{total_step}")
                 wav, tokens  = model.generate_continuation(
-                            prompt=audio_chord,
+                            prompt=input_audio,
                             prompt_sample_rate=sr,
                             descriptions=[prompt],
                             progress=True,
