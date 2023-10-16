@@ -1,12 +1,19 @@
-# Cog implementation of MusicGen
-[![Replicate](https://replicate.com/joehoover/musicgen-melody/badge)](https://replicate.com/joehoover/musicgen-melody) 
+# Cog Implementation of MusicGen with Fine-tuner
+[![Replicate](https://replicate.com/sakemin/musicgen-fine-tuner/badge)](https://replicate.com/sakemin/musicgen-fine-tuner) 
+
+[MusicGen](https://replicate.com/meta/musicgen) represents a straightforward and manageable model designed for music generation, as described in [this research paper](https://arxiv.org/abs/2306.05284). This model allows users to refine MusicGen using their own datasets.
 
 MusicGen is [a simple and controllable model for music generation](https://arxiv.org/abs/2306.05284).  It is a single stage auto-regressive Transformer model trained over a 32kHz <a href="https://github.com/facebookresearch/encodec">EnCodec tokenizer</a> with 4 codebooks sampled at 50 Hz. Unlike existing methods like [MusicLM](https://arxiv.org/abs/2301.11325), MusicGen doesn't require a self-supervised semantic representation, and it generates all 4 codebooks in one pass. By introducing a small delay between the codebooks, the authors show they can predict them in parallel, thus having only 50 auto-regressive steps per second of audio. They used 20K hours of licensed music to train MusicGen. Specifically, they relied on an internal dataset of 10K high-quality music tracks, and on the ShutterStock and Pond5 music data.
 
 
 For more information about this model, see [here](https://github.com/facebookresearch/audiocraft).
 
-You can demo this model or learn how to use it with Replicate's API [here](https://replicate.com/joehoover/musicgen-melody). 
+You can demo this model or learn how to use it with Replicate's API [here](https://replicate.com/sakemin/musicgen-fine-tuner). 
+
+## Prediction
+### Default Model
+- In this repository, the default prediction model is configured as the melody model.
+- After completing the fine-tuning process from this repository, the trained model weights will be loaded into your own model repository on Replicate.
 
 # Run with Cog
 
@@ -30,7 +37,7 @@ GPU machine](https://replicate.com/docs/guides/get-a-gpu-machine).
 ## Step 1. Clone this repository
 
 ```sh
-git clone https://github.com/replicate/cog-musicgen-melody
+git clone https://github.com/sakemin/cog-musicgen-fine-tuner
 ```
 
 ## Step 2. Run the model
@@ -38,15 +45,15 @@ git clone https://github.com/replicate/cog-musicgen-melody
 To run the model, you need a local copy of the model's Docker image. You can satisfy this requirement by specifying the image ID in your call to `predict` like:
 
 ```
-cog predict r8.im/joehoover/musicgen-melody@sha256:1a53415e6c4549e3022a0af82f4bd22b9ae2e747a8193af91b0bdffe63f93dfd -i description=tense staccato strings. plucked strings. dissonant. scary movie. -i duration=8
+cog predict r8.im/sakemin/musicgen-fine-tuner@sha256:aa4abfe6774b6c14f7835cbd284c0a55cec095ea4ae956493af28a52d00643b6 -i prompt="tense staccato strings. plucked strings. dissonant. scary movie." -i duration=8
 ```
 
-For more information, see the Cog section [here](https://replicate.com/joehoover/musicgen-melody/api#run)
+For more information, see the Cog section [here](https://replicate.com/sakemin/musicgen-fine-tuner/api#run)
 
 Alternatively, you can build the image yourself, either by running `cog build` or by letting `cog predict` trigger the build process implicitly. For example, the following will trigger the build process and then execute prediction: 
 
 ```
-cog predict -i description="tense staccato strings. plucked strings. dissonant. scary movie." -i duration=8
+cog predict -i prompt="tense staccato strings. plucked strings. dissonant. scary movie." -i duration=8
 ```
 
 Note, the first time you run `cog predict`, model weights and other requisite assets will be downloaded if they're not available locally. This download only needs to be executed once.
@@ -58,7 +65,7 @@ Note, the first time you run `cog predict`, model weights and other requisite as
 If you haven't already, you should ensure that your model runs locally with `cog predict`. This will guarantee that all assets are accessible. E.g., run: 
 
 ```
-cog predict -i description=tense staccato strings. plucked strings. dissonant. scary movie. -i duration=8
+cog predict -i prompt=tense staccato strings. plucked strings. dissonant. scary movie. -i duration=8
 ```
 
 ## Step 2. Create a model on Replicate.
@@ -88,64 +95,66 @@ cog push r8.im/username/modelname
 
 [Learn more about pushing models to Replicate.](https://replicate.com/docs/guides/push-a-model)
 
-# Fine-tune MusicGen
-
-Support for fine-tuning MusicGen is in development. Currently, minimal support has been implemented via an adaptation of @chavez's [`music_gen` trainer](https://github.com/chavinlo/musicgen_trainer). 
+# Fine-tuning MusicGen
 
 Assuming you have a local environment configured (i.e. you've completed the steps specified under Run with Cog), you can run training with a command like:
 
 ```
 cog train -i dataset_path=@<path-to-your-data> <additional hyperparameters>
 ```
+## Dataset
+### Audio
+- Compressed files in formats like .zip, .tar, .gz, and .tgz are compatible for dataset uploads.
+- Single audio files with .mp3, .wav, and .flac formats can also be uploaded.
+- Audio files within the dataset must exceed 30 seconds in duration.
+- **Audio Chunking:** Files surpassing 30 seconds will be divided into multiple 30-second chunks.
+- **Vocal Removal:** If `drop_vocals` is set to `True`, the vocal tracks in the audio files will be isolated and removed (Default: `True`).
+	- For datasets containing audio without vocals, setting `drop_vocals=False` reduces data preprocessing time and maintains audio file quality.	
+### Text Description
+- If each audio file requires a distinct description, create a .txt file with a single-line description corresponding to each .mp3 or .wav file (e.g., `01_A_Man_Without_Love.mp3` and `01_A_Man_Without_Love.txt`).
+- For a uniform description across all audio files, set the `one_same_description` argument to your desired description. In this case, there's no need for individual .txt files.
+- **Auto Labeling:** When `auto_labeling` is set to `True`, labels such as 'genre', 'mood', 'theme', 'instrumentation', 'key', and 'bpm' will be generated and added to each audio file in the dataset (Default: `True`).
+	- [Available Tags for Labeling](https://github.com/sakemin/cog-musicgen/blob/main/metadata.py)
+## Train Parameters
+### Train Inputs
+- `dataset_path`: Path = Input("Path to the dataset directory")
+- `one_same_description`: str = Input(description="A description for all audio data", default=None)
+- `"auto_labeling"`: bool = Input(description="Generate labels (genre, mood, theme, etc.) for each track using `essentia-tensorflow` for music information retrieval", default=True)
+- `"drop_vocals"`: bool = Input(description="Remove vocal tracks from audio files using Demucs source separation", default=True)
+- `model_version`: str = Input(description="Model version to train", default="small", choices=["melody", "small", "medium", "large"])
+- `lr`: float = Input(description="Learning rate", default=1)
+- `epochs`: int = Input(description="Number of epochs to train for", default=10)
+- `updates_per_epoch`: int = Input(description="Number of iterations for one epoch", default=100) #If None, iterations per epoch will be set according to dataset/batch size. If a value is provided, the number of iterations per epoch will be set as specified.
+- `batch_size`: int = Input(description="Batch size", default=3)
+### Default Parameters
+- Using `epochs=3`, `updates_per_epoch=100`, and `lr=1`, the fine-tuning process takes approximately 15 minutes.
+- For 8 GPU multiprocessing, `batch_size` must be a multiple of 8. Otherwise, `batch_size` will be automatically set to the nearest multiple of 8.
+- For the `medium` model, the maximum `batch_size` is `8` with the specified 8 x Nvidia A40 machine setting.
 
-## Data preparation for training
+## Example Code with Replicate API
+```python
+import replicate
 
-Cog requires input data to be a file; however, our training script expects a directory. Accordingly, 
-in production, training data should be provided as a tarball of a directory of properly formatted training data. 
-However, you can bypass this requirement by naming your training data directory `./train_data`. If such a directory exists,
-the training script will attempt to load data from that directory (see lines 140-147 in `train.py`).
-
-Currently, training only supports music generation with text prompts. 
-
-To train the model on your own data, follow these steps: 
-
-1. Convert your audio files to .wav segments of no more than 30 seconds'
-2. Every audio file in your training directory must have a correspondint `.txt` file with the same filename. These text files should contain the text prompt that you want to associat with the corresponding audio file. For example, if you have `audio_1.wav`, you must also have `audio_1.txt` and that text file should contain the prompt for `audio_1.wav`. 
-3. These files should be placed in a single directory. 
-4. If that directory is called `./train_data`, then you can simply run the training script like: 
-```
-cog train -i dataset_path=@./train_data/ <additional hyperparameters>
-```
-5. Alternatively, if `train_data` does not exist, you can tarball your data directory and pass the path to the tarball to `cog train ...`. The train script will then untar your data and attempt to load it. 
-
-### Example
-
-Run this to train on a single clip:
-
-```
-mkdir ./train_data/
-wget -P ./train_data/ https://github.com/facebookresearch/audiocraft/raw/main/assets/bach.mp3
-echo bach > ./train_data/bach.txt
-tar -cvzf train_data.tar.gz train_data/
-cog train -i dataset_path=@./data.tar.gz -i epochs=10
-```
-
-Then, you can load your model like `model.lm.load_state_dict(torch.load('model_outdir/lm_final.pt'))` and generate like:
-
-```
-model.set_generation_params(
-    duration=8,
-    top_k=250,
-    top_p=0,
-    temperature=1,
-    cfg_coef=3,
+training = replicate.trainings.create(
+	version="sakemin/musicgen:6d89fa8d6d4f208fbdd639c65933241934aa312efabe657bb71f349ee7a7c734",
+  input={
+    "dataset_path":"https://your/data/path.zip",
+    "one_same_description":"description for your dataset music",
+    "epochs":3,
+    "updates_per_epoch":100,
+    "model_version":"medium",
+  },
+  destination="my-name/my-model"
 )
-wav = model.generate(descriptions=[''], progress=True)
+
+print(training)
 ```
-
-# Licenses
-
-* All code in this repository is licensed under the Apache License 2.0 license.
-* The code in the [Audiocraft](https://github.com/facebookresearch/audiocraft) repository is released under the MIT license as found in the [LICENSE file](LICENSE).
-* The weights in the [Audiocraft](https://github.com/facebookresearch/audiocraft) repository are released under the CC-BY-NC 4.0 license as found in the [LICENSE_weights file](LICENSE_weights).
-
+---
+## References
+- The auto-labeling feature utilizes [`effnet-discogs`](https://replicate.com/mtg/effnet-discogs) from [MTG](https://github.com/MTG)'s [`essentia`](https://github.com/MTG/essentia).
+- 'key' and 'bpm' values are obtained using `librosa`.
+- Vocal dropping is implemented using Meta's [`demucs`](https://github.com/facebookresearch/demucs).
+## Licenses
+- All code in this repository is licensed under the [Apache License 2.0 license](https://github.com/sakemin/cog-musicgen-fine-tuner/blob/main/LICENSE).
+- The code in the [Audiocraft](https://github.com/facebookresearch/audiocraft) repository is released under the MIT license (see [LICENSE file](https://github.com/facebookresearch/audiocraft/blob/main/LICENSE)).
+- The weights in the [Audiocraft](https://github.com/facebookresearch/audiocraft) repository are released under the CC-BY-NC 4.0 license (see [LICENSE_weights file](https://github.com/facebookresearch/audiocraft/blob/main/LICENSE_weights)).
