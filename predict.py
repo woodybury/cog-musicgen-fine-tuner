@@ -192,6 +192,10 @@ class Predictor(BasePredictor):
             description="Seed for random number generator. If None or -1, a random seed will be used.",
             default=None,
         ),
+        replicate_weights: str = Input(
+            description="Replicate MusicGen weights to use. Leave blank to use the default weights.",
+            default=None,
+        ),
     ) -> Path:
 
         if prompt is None and input_audio is None:
@@ -237,6 +241,9 @@ class Predictor(BasePredictor):
         # elif model_version == "finetuned":
         #     model = self.my_model
 
+        if replicate_weights:
+            self.model = load_ckpt(replicate_weights, self.device)
+        
         model = self.model
 
         set_generation_params = lambda duration: model.set_generation_params(
