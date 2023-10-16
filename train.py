@@ -19,10 +19,10 @@ import subprocess as sp
 from tqdm import tqdm
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
-        
+
 from essentia.standard import (
-    MonoLoader, 
-    TensorflowPredictEffnetDiscogs, 
+    MonoLoader,
+    TensorflowPredictEffnetDiscogs,
     TensorflowPredict2D,
 )
 os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2,3,4,5,6,7'
@@ -45,7 +45,7 @@ def prepare_data(
         meta_path: str = 'src/meta',
         auto_labeling: bool = True,
         drop_vocals: bool = True):
-    
+
     d_path = Path(target_path)
     d_path.mkdir(exist_ok=True, parents=True)
 
@@ -62,7 +62,7 @@ def prepare_data(
         os.rename(str(dataset_path), target_path + '/' + str(dataset_path.name))
     else:
         raise Exception("Not supported compression file type. The file type should be one of 'zip', 'tar', 'tar.gz', 'tgz' types of compression file, or a single 'wav', 'mp3', 'flac' types of audio file.")
-    
+
     # Audio Chunking and Vocal Dropping
     if (Path(target_path)/"__MACOSX").exists():
         os.remove(target_path+"/__MACOSX")
@@ -85,7 +85,7 @@ def prepare_data(
                 origin, separated = separator.separate_audio_file(target_path + '/' + filename)
                 mixed = separated["bass"] + separated["drums"] + separated["other"]
                 torchaudio.save(target_path + '/' + filename, mixed, separator.samplerate)
-            
+
 
             # Chuking audio files into 30sec chunks
             audio = AudioSegment.from_file(target_path + '/' + filename)
@@ -93,7 +93,7 @@ def prepare_data(
             audio = audio.set_frame_rate(44100) # Resampling to 44100
 
             print('Chunking ' + filename)
-            
+
             # Splitting the audio files into 30-second chunks
             for i in range(0, len(audio), 30000):
                 chunk = audio[i:i + 30000]
@@ -103,18 +103,18 @@ def prepare_data(
 
     max_sample_rate = 0
     import json
-    
+
     # Auto Labeling
     if auto_labeling:
         sp.call(["curl", "https://essentia.upf.edu/models/classification-heads/genre_discogs400/genre_discogs400-discogs-effnet-1.pb", "--output", "genre_discogs400-discogs-effnet-1.pb"])
         sp.call(["curl", "https://essentia.upf.edu/models/feature-extractors/discogs-effnet/discogs-effnet-bs64-1.pb", "--output", "discogs-effnet-bs64-1.pb"])
         sp.call(["curl", "https://essentia.upf.edu/models/classification-heads/mtg_jamendo_moodtheme/mtg_jamendo_moodtheme-discogs-effnet-1.pb", "--output", "mtg_jamendo_moodtheme-discogs-effnet-1.pb"])
         sp.call(["curl", "https://essentia.upf.edu/models/classification-heads/mtg_jamendo_instrument/mtg_jamendo_instrument-discogs-effnet-1.pb", "--output", "mtg_jamendo_instrument-discogs-effnet-1.pb"])
-        
+
 
         from metadata import genre_labels, mood_theme_classes, instrument_classes
         import numpy as np
-        
+
         def filter_predictions(predictions, class_list, threshold=0.1):
             predictions_mean = np.mean(predictions, axis=0)
             sorted_indices = np.argsort(predictions_mean)[::-1]
@@ -167,6 +167,9 @@ def prepare_data(
         with open(meta_path + "/data.jsonl", "w") as train_file:
             files = os.listdir(target_path)
             for filename in tqdm(files):
+                if Path(os.path.join(target_path, filename)).is_dir():
+                    continue
+
                 result = get_audio_features(os.path.join(target_path, filename))
 
                 # Obtaining key and BPM
@@ -214,7 +217,7 @@ def prepare_data(
             filelen = len(files)
     else:
         import audiocraft.data.audio_dataset
-        
+
         meta = audiocraft.data.audio_dataset.find_audio_files(target_path, audiocraft.data.audio_dataset.DEFAULT_EXTS, progress=True, resolve=False, minimal=True, workers=10)
 
         for m in meta:
@@ -246,7 +249,7 @@ def prepare_data(
         jsonf = open(str(audio).rsplit('.', 1)[0] + '.json', 'r')
         fdict = json.load(jsonf)
         jsonf.close()
-        
+
         # assert Path(str(audio).rsplit('.', 1)[0] + '.txt').exists() or Path(str(audio).rsplit('_chunk', 1)[0] + '.txt').exists() or one_same_description is not None
 
         if one_same_description is None:
@@ -283,10 +286,10 @@ def train(
         warmup: int = Input(description="Warmup of lr_scheduler", default=0),
         cfg_p: float = Input(description="CFG dropout ratio", default=0.3),
 ) -> TrainingOutput:
-    
+
     meta_path = 'src/meta'
     target_path = 'src/train_data'
-    
+
     out_path = "trained_model.tar"
 
     # Removing previous training's leftover
@@ -353,10 +356,9 @@ def train(
     for dirpath, dirnames, filenames in os.walk("tmp"):
         for filename in [f for f in filenames if f == "checkpoint.th"]:
             checkpoint_dir = os.path.join(dirpath, filename)
-    
+
     loaded = torch.load(checkpoint_dir, map_location=torch.device('cpu'))
 
     torch.save({'xp.cfg': loaded["xp.cfg"], "model": loaded["model"]}, out_path)
-    
-    return TrainingOutput(weights=Path(out_path))
 
+    return TrainingOutput(weights=Path(out_path))
