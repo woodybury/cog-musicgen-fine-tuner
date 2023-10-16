@@ -64,9 +64,9 @@ def prepare_data(
         raise Exception("Not supported compression file type. The file type should be one of 'zip', 'tar', 'tar.gz', 'tgz' types of compression file, or a single 'wav', 'mp3', 'flac' types of audio file.")
     
     # Audio Chunking and Vocal Dropping
-    if Path(target_path)/"__MACOSX".exists():
+    if (Path(target_path)/"__MACOSX").exists():
         os.remove(target_path+"/__MACOSX")
-    if Path(target_path)/".DS_Store".exists():
+    if (Path(target_path)/".DS_Store").exists():
         os.remove(target_path+"/.DS_Store")
 
     from pydub import AudioSegment
