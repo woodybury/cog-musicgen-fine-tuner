@@ -143,7 +143,7 @@ class Predictor(BasePredictor):
             default=None,
         ),
         duration: int = Input(
-            description="Duration of the generated audio in seconds.", default=8, le=30
+            description="Duration of the generated audio in seconds.", default=8
         ),
         continuation: bool = Input(
             description="If `True`, generated music will continue `melody`. Otherwise, generated music will mimic `audio_input`'s melody.",
@@ -243,7 +243,7 @@ class Predictor(BasePredictor):
 
         if replicate_weights:
             self.model = load_ckpt(replicate_weights, self.device)
-        
+
         model = self.model
 
         set_generation_params = lambda duration: model.set_generation_params(
@@ -253,65 +253,173 @@ class Predictor(BasePredictor):
             temperature=temperature,
             cfg_coef=classifier_free_guidance,
         )
-
+        
         if not seed or seed == -1:
             seed = torch.seed() % 2 ** 32 - 1
             set_all_seeds(seed)
         set_all_seeds(seed)
         print(f"Using seed {seed}")
 
-        if not input_audio:
-            set_generation_params(duration)
-            wav, tokens = model.generate([prompt], progress=True, return_tokens=True)
+        if duration > 30:
+            import math
 
-        # elif model_version == "encode-decode":
-        #     encoded_audio = self._preprocess_audio(input_audio, model)
-        #     set_generation_params(duration)
-        #     wav = model.compression_model.decode(encoded_audio).squeeze(0)
+            encodec_rate = 50
+            sub_duration=15
+            overlap = 30 - sub_duration
+            wavs = []
+            wav_sr = model.sample_rate
+            set_generation_params(30)
+            total_step = math.ceil((duration-overlap)/sub_duration)
 
-        else:
-            input_audio, sr = torchaudio.load(input_audio)
-            input_audio = input_audio[None] if input_audio.dim() == 2 else input_audio
-
-            continuation_start = 0 if not continuation_start else continuation_start
-            if continuation_end is None or continuation_end == -1:
-                continuation_end = input_audio.shape[2] / sr
-
-            if continuation_start > continuation_end:
-                raise ValueError(
-                    "`continuation_start` must be less than or equal to `continuation_end`"
-                )
-
-            input_audio_wavform = input_audio[
-                ..., int(sr * continuation_start) : int(sr * continuation_end)
-            ]
-            input_audio_duration = input_audio_wavform.shape[-1] / sr
-
-            if continuation:
-                if (
-                    duration + input_audio_duration
-                    > model.lm.cfg.dataset.segment_duration
-                ):
-                    raise ValueError(
-                        "duration + continuation duration must be <= 30 seconds"
-                    )
-
-                set_generation_params(duration + input_audio_duration)
-                wav, tokens = model.generate_continuation(
-                    prompt=input_audio_wavform,
-                    prompt_sample_rate=sr,
+            if input_audio is None: # Case 1
+                print(f"Step 1/{total_step}")
+                wav, tokens = model.generate([prompt], progress=True, return_tokens=True)
+                if multi_band_diffusion:
+                    wav = self.mbd.tokens_to_wav(tokens)
+                wavs.append(wav.detach().cpu())
+                for i in range((duration - overlap) // sub_duration - 1):
+                    print(f"Step {i+2}/{total_step}")
+                    wav, tokens= model.generate_continuation_with_audio_token(
+                    prompt=tokens[...,sub_duration*encodec_rate:],
                     descriptions=[prompt],
                     progress=True,
-                    return_tokens=True,
-                )
+                    return_tokens=True
+                    )
+                    if multi_band_diffusion:
+                        wav = self.mbd.tokens_to_wav(tokens)
+                    wavs.append(wav.detach().cpu())
+                if (duration - overlap) % sub_duration != 0:
+                    print(f"Step {total_step}/{total_step}")
+                    set_generation_params(overlap + ((duration - overlap) % sub_duration))
+                    wav, tokens = model.generate_continuation_with_audio_token(
+                        prompt=tokens[...,sub_duration*encodec_rate:],
+                        descriptions=[prompt],
+                        progress=True,
+                        return_tokens=True
+                    )
+                    if multi_band_diffusion:
+                        wav = self.mbd.tokens_to_wav(tokens)
+                    wavs.append(wav.detach().cpu())
+            elif input_audio is not None and continuation:
+                input_audio, sr = torchaudio.load(input_audio)
+                input_audio = input_audio[None] if input_audio.dim() == 2 else input_audio
+
+                continuation_start = 0 if not continuation_start else continuation_start
+                if continuation_end is None or continuation_end == -1:
+                    continuation_end = input_audio.shape[2] / sr
+
+                if continuation_start > continuation_end:
+                    raise ValueError(
+                        "`continuation_start` must be less than or equal to `continuation_end`"
+                    )
+                if continuation_end - continuation_start >= 30:
+                    raise ValueError(
+                        f"input_audio duration({continuation_end - continuation_start}) must be < 30 seconds. Use `continuation_start` and `continuation_end` to trim the input_audio out."
+                    )
+
+                audio_chords = audio_chords[
+                    ..., int(sr * continuation_start) : int(sr * continuation_end)
+                ]
+
+                print(f"Step 1/{total_step}")
+                wav, tokens  = model.generate_continuation(
+                            prompt=audio_chord,
+                            prompt_sample_rate=sr,
+                            descriptions=[prompt],
+                            progress=True,
+                            return_tokens=True
+                        )           
+                if multi_band_diffusion:
+                    wav = self.mbd.tokens_to_wav(tokens)
+                wavs.append(wav.detach().cpu())
+                for i in range((duration - overlap) // sub_duration - 1):
+                    print(f"Step {i+2}/{total_step}")
+                    wav, tokens= model.generate_continuation_with_audio_token(
+                    prompt=tokens[...,sub_duration*encodec_rate:],
+                    descriptions=[prompt],
+                    progress=True,
+                    return_tokens=True
+                    )
+                    if multi_band_diffusion:
+                        wav = self.mbd.tokens_to_wav(tokens)
+                    wavs.append(wav.detach().cpu())
+                if (duration - overlap) % sub_duration != 0:
+                    print(f"Step {total_step}/{total_step}")
+                    set_generation_params(overlap + ((duration - overlap) % sub_duration))
+                    wav, tokens = model.generate_continuation_with_audio_token(
+                        prompt=tokens[...,sub_duration*encodec_rate:],
+                        descriptions=[prompt],
+                        progress=True,
+                        return_tokens=True
+                    )
+                    if multi_band_diffusion:
+                        wav = self.mbd.tokens_to_wav(tokens)
+                    wavs.append(wav.detach().cpu())
+            else :
+                raise ValueError("Infinite generation(duration > 30) is only available without melody conditioning.")
+
+            wav = wavs[0][...,:sub_duration*wav_sr]
+            for i in range(len(wavs)-1):
+                if i == len(wavs)-2:
+                    wav = torch.concat([wav,wavs[i+1]],dim=-1)
+                else:
+                    wav = torch.concat([wav,wavs[i+1][...,:sub_duration*wav_sr]],dim=-1)
+
+            wav = wav.cpu()
+
+        else:
+            if not input_audio:
+                set_generation_params(duration)
+                wav, tokens = model.generate([prompt], progress=True, return_tokens=True)
+
+            # elif model_version == "encode-decode":
+            #     encoded_audio = self._preprocess_audio(input_audio, model)
+            #     set_generation_params(duration)
+            #     wav = model.compression_model.decode(encoded_audio).squeeze(0)
 
             else:
-                set_generation_params(duration)
-                wav, tokens = model.generate_with_chroma(
-                    [prompt], input_audio_wavform, sr, progress=True, return_tokens=True
-                )
-        if multi_band_diffusion:
-            wav = self.mbd.tokens_to_wav(tokens)
+                input_audio, sr = torchaudio.load(input_audio)
+                input_audio = input_audio[None] if input_audio.dim() == 2 else input_audio
+
+                continuation_start = 0 if not continuation_start else continuation_start
+                if continuation_end is None or continuation_end == -1:
+                    continuation_end = input_audio.shape[2] / sr
+
+                if continuation_start > continuation_end:
+                    raise ValueError(
+                        "`continuation_start` must be less than or equal to `continuation_end`"
+                    )
+
+                input_audio_wavform = input_audio[
+                    ..., int(sr * continuation_start) : int(sr * continuation_end)
+                ]
+                input_audio_duration = input_audio_wavform.shape[-1] / sr
+
+                if continuation:
+                    if (
+                        duration + input_audio_duration
+                        > model.lm.cfg.dataset.segment_duration
+                    ):
+                        raise ValueError(
+                            "duration + continuation duration must be <= 30 seconds"
+                        )
+
+                    set_generation_params(duration + input_audio_duration)
+                    wav, tokens = model.generate_continuation(
+                        prompt=input_audio_wavform,
+                        prompt_sample_rate=sr,
+                        descriptions=[prompt],
+                        progress=True,
+                        return_tokens=True,
+                    )
+
+                else:
+                    set_generation_params(duration)
+                    wav, tokens = model.generate_with_chroma(
+                        [prompt], input_audio_wavform, sr, progress=True, return_tokens=True
+                    )
+            if multi_band_diffusion:
+                wav = self.mbd.tokens_to_wav(tokens)
 
         audio_write(
             "out",
