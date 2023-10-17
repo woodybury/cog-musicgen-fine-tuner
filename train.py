@@ -65,9 +65,17 @@ def prepare_data(
 
     # Audio Chunking and Vocal Dropping
     if (Path(target_path)/"__MACOSX").exists():
-        os.remove(target_path+"/__MACOSX")
+        if (Path(target_path)/"__MACOSX").is_dir():
+            import shutil
+            shutil.rmtree(target_path+"/__MACOSX")
+        elif (Path(target_path)/"__MACOSX").is_file():
+            os.remove(target_path+"/__MACOSX")
     if (Path(target_path)/".DS_Store").exists():
-        os.remove(target_path+"/.DS_Store")
+        if (Path(target_path)/".DS_Store").is_dir():
+            import shutil
+            shutil.rmtree(target_path+"/.DS_Store")
+        elif (Path(target_path)/".DS_Store").is_file():
+            os.remove(target_path+"/.DS_Store")
 
     from pydub import AudioSegment
 
@@ -165,15 +173,15 @@ def prepare_data(
 
         os.mkdir(meta_path)
         with open(meta_path + "/data.jsonl", "w") as train_file:
-            files = os.listdir(target_path)
+            files = list(d_path.rglob('*.mp3')) + list(d_path.rglob('*.wav'))
             for filename in tqdm(files):
-                if Path(os.path.join(target_path, filename)).is_dir():
-                    continue
+                # if filename.is_dir():
+                    # continue
 
-                result = get_audio_features(os.path.join(target_path, filename))
+                result = get_audio_features(str(filename))
 
                 # Obtaining key and BPM
-                y, sr = librosa.load(os.path.join(target_path, filename))
+                y, sr = librosa.load(str(filename))
                 tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
                 tempo = round(tempo)
                 chroma = librosa.feature.chroma_stft(y=y, sr=sr)
@@ -181,7 +189,7 @@ def prepare_data(
                 key = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'][key]
                 length = librosa.get_duration(y=y, sr=sr)
 
-                sr = librosa.get_samplerate(os.path.join(target_path, filename))
+                sr = librosa.get_samplerate(str(filename))
                 if sr > max_sample_rate:
                     max_sample_rate = sr
 
@@ -201,9 +209,9 @@ def prepare_data(
                     "name": "",
                     "instrument": result.get('instruments', ""),
                     "moods": result.get('moods', []),
-                    "path": os.path.join(target_path, filename),
+                    "path": str(filename),
                 }
-                with open(os.path.join(target_path, filename).rsplit('.', 1)[0] + '.json', "w") as file:
+                with open(str(filename).rsplit('.', 1)[0] + '.json', "w") as file:
                     json.dump(entry, file)
                 print(entry)
 
