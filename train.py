@@ -63,20 +63,19 @@ def prepare_data(
     else:
         raise Exception("Not supported compression file type. The file type should be one of 'zip', 'tar', 'tar.gz', 'tgz' types of compression file, or a single 'wav', 'mp3', 'flac' types of audio file.")
 
-    # Audio Chunking and Vocal Dropping
-    if (Path(target_path)/"__MACOSX").exists():
-        if (Path(target_path)/"__MACOSX").is_dir():
-            import shutil
-            shutil.rmtree(target_path+"/__MACOSX")
-        elif (Path(target_path)/"__MACOSX").is_file():
-            os.remove(target_path+"/__MACOSX")
-    if (Path(target_path)/".DS_Store").exists():
-        if (Path(target_path)/".DS_Store").is_dir():
-            import shutil
-            shutil.rmtree(target_path+"/.DS_Store")
-        elif (Path(target_path)/".DS_Store").is_file():
-            os.remove(target_path+"/.DS_Store")
+    # Removing __MACOSX and .DS_Store
+    if (Path(target_path)/"__MACOSX").is_dir():
+        import shutil
+        shutil.rmtree(target_path+"/__MACOSX")
+    elif (Path(target_path)/"__MACOSX").is_file():
+        os.remove(target_path+"/__MACOSX")
+    if (Path(target_path)/".DS_Store").is_dir():
+        import shutil
+        shutil.rmtree(target_path+"/.DS_Store")
+    elif (Path(target_path)/".DS_Store").is_file():
+        os.remove(target_path+"/.DS_Store")
 
+    # Audio Chunking and Vocal Dropping
     from pydub import AudioSegment
 
     if drop_vocals:
