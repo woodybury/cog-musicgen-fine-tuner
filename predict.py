@@ -396,15 +396,7 @@ class Predictor(BasePredictor):
                 input_audio_duration = input_audio_wavform.shape[-1] / sr
 
                 if continuation:
-                    if (
-                        duration + input_audio_duration
-                        > model.lm.cfg.dataset.segment_duration
-                    ):
-                        raise ValueError(
-                            "duration + continuation duration must be <= 30 seconds"
-                        )
-
-                    set_generation_params(duration + input_audio_duration)
+                    set_generation_params(duration)
                     wav, tokens = model.generate_continuation(
                         prompt=input_audio_wavform,
                         prompt_sample_rate=sr,
