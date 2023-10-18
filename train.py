@@ -98,15 +98,16 @@ def prepare_data(
             audio = AudioSegment.from_file(target_path + '/' + filename)
 
             audio = audio.set_frame_rate(44100) # Resampling to 44100
+            
+            if len(audio)>30000:
+                print('Chunking ' + filename)
 
-            print('Chunking ' + filename)
-
-            # Splitting the audio files into 30-second chunks
-            for i in range(0, len(audio), 30000):
-                chunk = audio[i:i + 30000]
-                if len(chunk) == 30000: # Omitting residuals with <30sec duration
-                    chunk.export(f"{target_path + '/' + filename[:-4]}_chunk{i//1000}.wav", format="wav")
-            os.remove(target_path + '/' + filename)
+                # Splitting the audio files into 30-second chunks
+                for i in range(0, len(audio), 30000):
+                    chunk = audio[i:i + 30000]
+                    if len(chunk) > 5000: # Omitting residuals with <5sec duration
+                        chunk.export(f"{target_path + '/' + filename[:-4]}_chunk{i//1000}.wav", format="wav")
+                os.remove(target_path + '/' + filename)
 
     max_sample_rate = 0
     import json
@@ -173,6 +174,8 @@ def prepare_data(
         os.mkdir(meta_path)
         with open(meta_path + "/data.jsonl", "w") as train_file:
             files = list(d_path.rglob('*.mp3')) + list(d_path.rglob('*.wav'))
+            if len(files)==0:
+                raise ValueError("No audio file detected. Are you sure the audio file is longer than 5 seconds?")
             for filename in tqdm(files):
                 # if filename.is_dir():
                     # continue
@@ -227,6 +230,9 @@ def prepare_data(
 
         meta = audiocraft.data.audio_dataset.find_audio_files(target_path, audiocraft.data.audio_dataset.DEFAULT_EXTS, progress=True, resolve=False, minimal=True, workers=10)
 
+        if len(meta)==0:
+            raise ValueError("No audio file detected. Are you sure the audio file is longer than 5 seconds?")
+        
         for m in meta:
             if m.sample_rate > max_sample_rate:
                 max_sample_rate = m.sample_rate
@@ -279,7 +285,7 @@ def prepare_data(
     return max_sample_rate, filelen
 
 def train(
-        dataset_path: Path = Input("Path to dataset directory. Input audio files will be chunked into multiple 30 second audio files. Must be one of 'tar', 'tar.gz', 'gz', 'zip' types of compressed file, or a single 'wav', 'mp3', 'flac' file. Audio files must be longer than 30 seconds.",),
+        dataset_path: Path = Input("Path to dataset directory. Input audio files will be chunked into multiple 30 second audio files. Must be one of 'tar', 'tar.gz', 'gz', 'zip' types of compressed file, or a single 'wav', 'mp3', 'flac' file. Audio files must be longer than 5 seconds.",),
         auto_labeling: bool = Input(description="Creating label data like genre, mood, theme, instrumentation, key, bpm for each track. Using `essentia-tensorflow` for music information retrieval.", default=True),
         drop_vocals: bool = Input(description="Dropping the vocal tracks from the audio files in dataset, by separating sources with Demucs.", default=True),
         one_same_description: str = Input(description="A description for all of audio data", default=None),
