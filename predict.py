@@ -357,21 +357,23 @@ class Predictor(BasePredictor):
                     wavs.append(wav.detach().cpu())
             else :
                 input_audio, sr = torchaudio.load(input_audio)
+                input_audio = input_audio[None] if input_audio.dim() == 2 else input_audio
+
+                continuation_start = 0 if not continuation_start else continuation_start
+                
+                if continuation_end is None or continuation_end == -1:
+                    continuation_end = input_audio.shape[-1] / sr
+
+                if continuation_start > continuation_end:
+                    raise ValueError(
+                        "`continuation_start` must be less than or equal to `continuation_end`"
+                    )
+
+                input_audio = input_audio[
+                    ..., int(sr * continuation_start) : int(sr * continuation_end)
+                ]
+
                 if input_audio.shape[-1]/sr > duration:
-                    input_audio = input_audio[None] if input_audio.dim() == 2 else input_audio
-
-                    continuation_start = 0 if not continuation_start else continuation_start
-                    if continuation_end is None or continuation_end == -1:
-                        continuation_end = input_audio.shape[-1] / sr
-
-                    if continuation_start > continuation_end:
-                        raise ValueError(
-                            "`continuation_start` must be less than or equal to `continuation_end`"
-                        )
-
-                    input_audio = input_audio[
-                        ..., int(sr * continuation_start) : int(sr * continuation_end)
-                    ]
                     wav, tokens = model.generate_with_chroma(['the intro of ' + prompt], input_audio[...,:30*sr], sr, progress=True, return_tokens=True)
                     if multi_band_diffusion:
                         wav = self.mbd.tokens_to_wav(tokens)
