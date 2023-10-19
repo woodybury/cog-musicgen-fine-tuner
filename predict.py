@@ -356,7 +356,53 @@ class Predictor(BasePredictor):
                         wav = self.mbd.tokens_to_wav(tokens)
                     wavs.append(wav.detach().cpu())
             else :
-                raise ValueError("Infinite generation(duration > 30) is only available without melody conditioning.")
+                input_audio, sr = torchaudio.load(input_audio)
+                if input_audio.shape[-1]/sr > duration:
+                    input_audio = input_audio[None] if input_audio.dim() == 2 else input_audio
+
+                    continuation_start = 0 if not continuation_start else continuation_start
+                    if continuation_end is None or continuation_end == -1:
+                        continuation_end = input_audio.shape[-1] / sr
+
+                    if continuation_start > continuation_end:
+                        raise ValueError(
+                            "`continuation_start` must be less than or equal to `continuation_end`"
+                        )
+
+                    input_audio = input_audio[
+                        ..., int(sr * continuation_start) : int(sr * continuation_end)
+                    ]
+                    wav, tokens = model.generate_with_chroma(['the intro of ' + prompt], input_audio[...,:30*sr], sr, progress=True, return_tokens=True)
+                    if multi_band_diffusion:
+                        wav = self.mbd.tokens_to_wav(tokens)
+                    wavs.append(wav.detach().cpu())
+                    for i in range(int((duration - overlap) // sub_duration) - 1):
+                        wav, tokens = model.generate_continuation_with_audio_tokens_and_audio_chroma(
+                        prompt=tokens[...,sub_duration*encodec_rate:],
+                        melody_wavs = input_audio[...,sub_duration*(i+1)*sr:(sub_duration*(i+1)+30)*sr],
+                        melody_sample_rate=sr,
+                        descriptions=['chorus of ' + prompt],
+                        progress=True,
+                        return_tokens=True
+                        )
+                        if multi_band_diffusion:
+                            wav = self.mbd.tokens_to_wav(tokens)
+                        wavs.append(wav.detach().cpu())
+                    if int(duration - overlap) % sub_duration != 0:
+                        set_generation_params(overlap + ((duration - overlap) % sub_duration))
+                        wav, tokens = model.generate_continuation_with_audio_tokens_and_audio_chroma(
+                            prompt=tokens[...,sub_duration*encodec_rate:],
+                            melody_wavs = input_audio[...,sub_duration*(len(wavs))*sr:],
+                            melody_sample_rate=sr,
+                            descriptions=['the outro of ' + prompt],
+                            progress=True,
+                            return_tokens=True
+                        )
+                        if multi_band_diffusion:
+                            wav = self.mbd.tokens_to_wav(tokens)
+                        wavs.append(wav.detach().cpu())
+                else:
+                    raise ValueError("Infinite generation(duration > 30) is available with melody condition `input_audio` longer than `duration`.")
 
             wav = wavs[0][...,:sub_duration*wav_sr]
             for i in range(len(wavs)-1):
