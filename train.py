@@ -59,7 +59,8 @@ def prepare_data(
     elif str(dataset_path).rsplit('.', 1)[1] == 'tgz':
         subprocess.run(['tar', '-xzvf', str(dataset_path), '-C', target_path + '/'])
     elif str(dataset_path).rsplit('.', 1)[1] in ['wav', 'mp3', 'flac']:
-        os.rename(str(dataset_path), target_path + '/' + str(dataset_path.name))
+        import shutil
+        shutil.move(str(dataset_path), target_path + '/' + str(dataset_path.name))
     else:
         raise Exception("Not supported compression file type. The file type should be one of 'zip', 'tar', 'tar.gz', 'tgz' types of compression file, or a single 'wav', 'mp3', 'flac' types of audio file.")
 
