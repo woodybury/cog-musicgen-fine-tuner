@@ -114,7 +114,7 @@ cog train -i dataset_path=@<path-to-your-data> <additional hyperparameters>
 - If each audio file requires a distinct description, create a .txt file with a single-line description corresponding to each .mp3 or .wav file (e.g., `01_A_Man_Without_Love.mp3` and `01_A_Man_Without_Love.txt`).
 - For a uniform description across all audio files, set the `one_same_description` argument to your desired description. In this case, there's no need for individual .txt files.
 - **Auto Labeling:** When `auto_labeling` is set to `True`, labels such as 'genre', 'mood', 'theme', 'instrumentation', 'key', and 'bpm' will be generated and added to each audio file in the dataset (Default: `True`).
-	- [Available Tags for Labeling](https://github.com/sakemin/cog-musicgen/blob/main/metadata.py)
+	- [Available Tags for Labeling](https://github.com/sakemin/cog-musicgen-fine-tuner/blob/main/metadata.py)
 ## Train Parameters
 ### Train Inputs
 - `dataset_path`: Path = Input("Path to the dataset directory")
