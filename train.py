@@ -88,11 +88,11 @@ def prepare_data(
 
     for filename in tqdm(os.listdir(target_path)):
         if filename.endswith(('.mp3', '.wav', '.flac')):
-            if drop_vocals and separator is not None:
-                print('Separating Vocals from ' + filename)
-                origin, separated = separator.separate_audio_file(target_path + '/' + filename)
-                mixed = separated["bass"] + separated["drums"] + separated["other"]
-                torchaudio.save(target_path + '/' + filename, mixed, separator.samplerate)
+            # if drop_vocals and separator is not None:
+            #     print('Separating Vocals from ' + filename)
+            #     origin, separated = separator.separate_audio_file(target_path + '/' + filename)
+            #     mixed = separated["bass"] + separated["drums"] + separated["other"]
+            #     torchaudio.save(target_path + '/' + filename, mixed, separator.samplerate)
 
 
             # Chuking audio files into 30sec chunks
@@ -108,6 +108,11 @@ def prepare_data(
                     chunk = audio[i:i + 30000]
                     if len(chunk) > 5000: # Omitting residuals with <5sec duration
                         chunk.export(f"{target_path + '/' + filename[:-4]}_chunk{i//1000}.wav", format="wav")
+                        if drop_vocals and separator is not None:
+                            print('Separating Vocals from ' + f"{target_path + '/' + filename[:-4]}_chunk{i//1000}.wav")
+                            origin, separated = separator.separate_audio_file(f"{target_path + '/' + filename[:-4]}_chunk{i//1000}.wav")
+                            mixed = separated["bass"] + separated["drums"] + separated["other"]
+                            torchaudio.save(f"{target_path + '/' + filename[:-4]}_chunk{i//1000}.wav", mixed, separator.samplerate)
                 os.remove(target_path + '/' + filename)
 
     max_sample_rate = 0
