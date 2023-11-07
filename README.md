@@ -151,6 +151,7 @@ print(training)
 ```
 ---
 ## References
+-  Auto-labeling and audio chunking features are based on [lyramakemusic](https://github.com/lyramakesmusic)'s [Finetune-MusicGen](https://github.com/lyramakesmusic/finetune-musicgen) jupyter notebook.
 - The auto-labeling feature utilizes [`effnet-discogs`](https://replicate.com/mtg/effnet-discogs) from [MTG](https://github.com/MTG)'s [`essentia`](https://github.com/MTG/essentia).
 - 'key' and 'bpm' values are obtained using `librosa`.
 - Vocal dropping is implemented using Meta's [`demucs`](https://github.com/facebookresearch/demucs).
