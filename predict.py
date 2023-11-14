@@ -78,6 +78,7 @@ class Predictor(BasePredictor):
         if weights is not None:
             # self.my_model = MusicGen.get_pretrained(weights)
             # self.my_model = self.load_tensorizer(weights, model_version)
+            print("Fine-tuned model weights loaded!")
             self.model = load_ckpt(weights, self.device)
         else:
             self.model = self._load_model(
@@ -243,6 +244,7 @@ class Predictor(BasePredictor):
 
         if replicate_weights:
             self.model = load_ckpt(replicate_weights, self.device)
+            print("Fine-tuned model weights hot-swapped!")
 
         if multi_band_diffusion and int(self.model.lm.cfg.transformer_lm.n_q) == 8:
             raise ValueError("Multi-band Diffusion only works with non-stereo models.")
