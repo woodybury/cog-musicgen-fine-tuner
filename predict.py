@@ -198,8 +198,6 @@ class Predictor(BasePredictor):
         ),
     ) -> Path:
 
-        if multi_band_diffusion and int(self.model.lm.cfg.transformer_lm.n_q) == 8:
-            raise ValueError("Multi-band Diffusion only works with non-stereo models.")
         if prompt is None and input_audio is None:
             raise ValueError("Must provide either prompt or input_audio")
         if continuation and not input_audio:
@@ -245,6 +243,9 @@ class Predictor(BasePredictor):
 
         if replicate_weights:
             self.model = load_ckpt(replicate_weights, self.device)
+
+        if multi_band_diffusion and int(self.model.lm.cfg.transformer_lm.n_q) == 8:
+            raise ValueError("Multi-band Diffusion only works with non-stereo models.")
 
         model = self.model
 
