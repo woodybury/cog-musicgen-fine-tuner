@@ -61,7 +61,7 @@ def load_ckpt(path, device):
     lm.load_state_dict(loaded['model']) 
     lm.eval()
     lm.cfg = cfg
-    compression_model = CompressionSolver.wrapped_model_from_checkpoint(cfg, cfg.compression_model_checkpoint, device=device)
+    compression_model = CompressionSolver.model_from_checkpoint(cfg.compression_model_checkpoint, device=device)
     return MusicGen(f"{os.getenv('COG_USERNAME')}/musicgen-finetuned", compression_model, lm)
 
 class Predictor(BasePredictor):
@@ -83,7 +83,7 @@ class Predictor(BasePredictor):
             self.model = self._load_model(
                 model_path=MODEL_PATH,
                 cls=MusicGen,
-                model_id="facebook/musicgen-melody",
+                model_id="facebook/musicgen-stereo-melody",
             )
             # self.melody_model = self._load_model(
             #     model_path=MODEL_PATH,
@@ -160,7 +160,7 @@ class Predictor(BasePredictor):
             ge=0,
         ),
         multi_band_diffusion: bool = Input(
-            description="If `True`, the EnCodec tokens will be decoded with MultiBand Diffusion.",
+            description="If `True`, the EnCodec tokens will be decoded with MultiBand Diffusion. Only works with non-stereo models.",
             default=False,
         ),
         normalization_strategy: str = Input(
@@ -198,6 +198,8 @@ class Predictor(BasePredictor):
         ),
     ) -> Path:
 
+        if multi_band_diffusion and int(self.model.lm.cfg.transformer_lm.n_q) == 8:
+            raise ValueError("Multi-band Diffusion only works with non-stereo models.")
         if prompt is None and input_audio is None:
             raise ValueError("Must provide either prompt or input_audio")
         if continuation and not input_audio:
@@ -260,6 +262,7 @@ class Predictor(BasePredictor):
         set_all_seeds(seed)
         print(f"Using seed {seed}")
 
+        '''
         if duration > 30:
             import math
 
@@ -414,52 +417,53 @@ class Predictor(BasePredictor):
                     wav = torch.concat([wav,wavs[i+1][...,:sub_duration*wav_sr]],dim=-1)
 
             wav = wav.cpu()
+        
+        else:
+        '''
+        if not input_audio:
+            set_generation_params(duration)
+            wav, tokens = model.generate([prompt], progress=True, return_tokens=True)
+
+        # elif model_version == "encode-decode":
+        #     encoded_audio = self._preprocess_audio(input_audio, model)
+        #     set_generation_params(duration)
+        #     wav = model.compression_model.decode(encoded_audio).squeeze(0)
 
         else:
-            if not input_audio:
-                set_generation_params(duration)
-                wav, tokens = model.generate([prompt], progress=True, return_tokens=True)
+            input_audio, sr = torchaudio.load(input_audio)
+            input_audio = input_audio[None] if input_audio.dim() == 2 else input_audio
 
-            # elif model_version == "encode-decode":
-            #     encoded_audio = self._preprocess_audio(input_audio, model)
-            #     set_generation_params(duration)
-            #     wav = model.compression_model.decode(encoded_audio).squeeze(0)
+            continuation_start = 0 if not continuation_start else continuation_start
+            if continuation_end is None or continuation_end == -1:
+                continuation_end = input_audio.shape[2] / sr
+
+            if continuation_start > continuation_end:
+                raise ValueError(
+                    "`continuation_start` must be less than or equal to `continuation_end`"
+                )
+
+            input_audio_wavform = input_audio[
+                ..., int(sr * continuation_start) : int(sr * continuation_end)
+            ]
+            input_audio_duration = input_audio_wavform.shape[-1] / sr
+
+            if continuation:
+                set_generation_params(duration)
+                wav, tokens = model.generate_continuation(
+                    prompt=input_audio_wavform,
+                    prompt_sample_rate=sr,
+                    descriptions=[prompt],
+                    progress=True,
+                    return_tokens=True,
+                )
 
             else:
-                input_audio, sr = torchaudio.load(input_audio)
-                input_audio = input_audio[None] if input_audio.dim() == 2 else input_audio
-
-                continuation_start = 0 if not continuation_start else continuation_start
-                if continuation_end is None or continuation_end == -1:
-                    continuation_end = input_audio.shape[2] / sr
-
-                if continuation_start > continuation_end:
-                    raise ValueError(
-                        "`continuation_start` must be less than or equal to `continuation_end`"
-                    )
-
-                input_audio_wavform = input_audio[
-                    ..., int(sr * continuation_start) : int(sr * continuation_end)
-                ]
-                input_audio_duration = input_audio_wavform.shape[-1] / sr
-
-                if continuation:
-                    set_generation_params(duration)
-                    wav, tokens = model.generate_continuation(
-                        prompt=input_audio_wavform,
-                        prompt_sample_rate=sr,
-                        descriptions=[prompt],
-                        progress=True,
-                        return_tokens=True,
-                    )
-
-                else:
-                    set_generation_params(duration)
-                    wav, tokens = model.generate_with_chroma(
-                        [prompt], input_audio_wavform, sr, progress=True, return_tokens=True
-                    )
-            if multi_band_diffusion:
-                wav = self.mbd.tokens_to_wav(tokens)
+                set_generation_params(duration)
+                wav, tokens = model.generate_with_chroma(
+                    [prompt], input_audio_wavform, sr, progress=True, return_tokens=True
+                )
+        if multi_band_diffusion:
+            wav = self.mbd.tokens_to_wav(tokens)
 
         audio_write(
             "out",

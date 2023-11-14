@@ -41,7 +41,7 @@ build:
     - "huggingface_hub"
     - "tqdm"
     - "transformers>=4.31.0"
-    - "xformers"
+    - "xformers==0.0.22"
     - "demucs"
     - "librosa"
     - "gradio"
@@ -52,6 +52,7 @@ build:
     - "pydub"
     - "numba"
     - "essentia-tensorflow"
+    - "moviepy"
 
   # commands run after the environment is setup
   run:

@@ -45,10 +45,10 @@ optim:
     device: cuda
 
 logging:
-  log_tensorboard: false
+  log_tensorboard: true
 
 schedule:
-  lr_scheduler: cosine
+  lr_scheduler: null
   cosine:
     warmup: 4000
     lr_min_ratio: 0.0

@@ -27,7 +27,7 @@ conditioners:
       n_chroma: 12
       radix2_exp: 14
       argmax: true
-      match_len_on_eval: false
+      match_len_on_eval: true
       eval_wavs: null
       n_eval_wavs: 100
       cache_path: cache

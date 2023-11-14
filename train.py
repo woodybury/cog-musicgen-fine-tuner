@@ -58,11 +58,11 @@ def prepare_data(
         subprocess.run(['tar', '-xvzf', str(dataset_path), '-C', target_path + '/'])
     elif str(dataset_path).rsplit('.', 1)[1] == 'tgz':
         subprocess.run(['tar', '-xzvf', str(dataset_path), '-C', target_path + '/'])
-    elif str(dataset_path).rsplit('.', 1)[1] in ['wav', 'mp3', 'flac']:
+    elif str(dataset_path).rsplit('.', 1)[1] in ['wav', 'mp3', 'flac', 'mp4']:
         import shutil
         shutil.move(str(dataset_path), target_path + '/' + str(dataset_path.name))
     else:
-        raise Exception("Not supported compression file type. The file type should be one of 'zip', 'tar', 'tar.gz', 'tgz' types of compression file, or a single 'wav', 'mp3', 'flac' types of audio file.")
+        raise Exception("Not supported compression file type. The file type should be one of 'zip', 'tar', 'tar.gz', 'tgz' types of compression file, or a single 'wav', 'mp3', 'flac', 'mp4' types of audio file.")
 
     # Removing __MACOSX and .DS_Store
     if (Path(target_path)/"__MACOSX").is_dir():
@@ -87,33 +87,34 @@ def prepare_data(
         separator = None
 
     for filename in tqdm(os.listdir(target_path)):
-        if filename.endswith(('.mp3', '.wav', '.flac')):
-            # if drop_vocals and separator is not None:
-            #     print('Separating Vocals from ' + filename)
-            #     origin, separated = separator.separate_audio_file(target_path + '/' + filename)
-            #     mixed = separated["bass"] + separated["drums"] + separated["other"]
-            #     torchaudio.save(target_path + '/' + filename, mixed, separator.samplerate)
-
-
+        if filename.endswith(('.mp3', '.wav', '.flac', '.mp4')):
+            if filename.endswith(('.mp4')):
+                import moviepy 
+                video = moviepy.editor.VideoFileClip(os.path(filename))
+                fname = filename.rsplit('.',1)[0]+'.mp4'
+                video.audio.write_audiofile(os.path.join(target_path, fname))
+                os.remove(target_path + '/' + filename)
+            else:
+                fname = filename
             # Chuking audio files into 30sec chunks
-            audio = AudioSegment.from_file(target_path + '/' + filename)
+            audio = AudioSegment.from_file(target_path + '/' + fname)
 
             audio = audio.set_frame_rate(44100) # Resampling to 44100
             
             if len(audio)>30000:
-                print('Chunking ' + filename)
+                print('Chunking ' + fname)
 
                 # Splitting the audio files into 30-second chunks
                 for i in range(0, len(audio), 30000):
                     chunk = audio[i:i + 30000]
                     if len(chunk) > 5000: # Omitting residuals with <5sec duration
-                        chunk.export(f"{target_path + '/' + filename[:-4]}_chunk{i//1000}.wav", format="wav")
+                        chunk.export(f"{target_path + '/' + fname[:-4]}_chunk{i//1000}.wav", format="wav")
                         if drop_vocals and separator is not None:
-                            print('Separating Vocals from ' + f"{target_path + '/' + filename[:-4]}_chunk{i//1000}.wav")
-                            origin, separated = separator.separate_audio_file(f"{target_path + '/' + filename[:-4]}_chunk{i//1000}.wav")
+                            print('Separating Vocals from ' + f"{target_path + '/' + fname[:-4]}_chunk{i//1000}.wav")
+                            origin, separated = separator.separate_audio_file(f"{target_path + '/' + fname[:-4]}_chunk{i//1000}.wav")
                             mixed = separated["bass"] + separated["drums"] + separated["other"]
-                            torchaudio.save(f"{target_path + '/' + filename[:-4]}_chunk{i//1000}.wav", mixed, separator.samplerate)
-                os.remove(target_path + '/' + filename)
+                            torchaudio.save(f"{target_path + '/' + fname[:-4]}_chunk{i//1000}.wav", mixed, separator.samplerate)
+                os.remove(target_path + '/' + fname)
 
     max_sample_rate = 0
     import json
@@ -295,7 +296,7 @@ def train(
         auto_labeling: bool = Input(description="Creating label data like genre, mood, theme, instrumentation, key, bpm for each track. Using `essentia-tensorflow` for music information retrieval.", default=True),
         drop_vocals: bool = Input(description="Dropping the vocal tracks from the audio files in dataset, by separating sources with Demucs.", default=True),
         one_same_description: str = Input(description="A description for all of audio data", default=None),
-        model_version: str = Input(description="Model version to train.", default="small", choices=["melody", "small", "medium"]),
+        model_version: str = Input(description="Model version to train.", default="stereo-melody", choices=["stereo-melody", "stereo-small", "stereo-medium", "melody", "small", "medium"]),
         epochs: int = Input(description="Number of epochs to train for", default=3),
         updates_per_epoch: int = Input(description="Number of iterations for one epoch", default=100),
         batch_size: int = Input(description="Batch size. Must be multiple of 8(number of gpus), for 8-gpu training.", default=16),
@@ -305,7 +306,6 @@ def train(
         warmup: int = Input(description="Warmup of lr_scheduler", default=0),
         cfg_p: float = Input(description="CFG dropout ratio", default=0.3),
 ) -> TrainingOutput:
-
     meta_path = 'src/meta'
     target_path = 'src/train_data'
 
@@ -314,29 +314,35 @@ def train(
     # Removing previous training's leftover
     if os.path.isfile(out_path):
         os.remove(out_path)
-
+    if os.path.isfile('weight'):
+        os.remove('weight')
     import shutil
     if os.path.isdir(meta_path):
         shutil.rmtree(meta_path)
     if os.path.isdir(target_path):
         shutil.rmtree(target_path)
+    if os.path.isdir('models'):
+        shutil.rmtree('models')
     if os.path.isdir('tmp'):
         shutil.rmtree('tmp')
 
     max_sample_rate, len_dataset = prepare_data(dataset_path, target_path, one_same_description, meta_path, auto_labeling, drop_vocals)
 
-    if model_version == "medium":
+    if model_version in ["melody", "stereo-melody", "medium", "stereo-medium"]:
         batch_size = 8
-        print(f"Batch size is reset to {batch_size}, since `medium` model can only be trained with 8 with current GPU settings.")
+        print(f"Batch size is reset to {batch_size}, since `medium(melody)` model can only be trained with 8 with current GPU settings.")
 
     if batch_size % 8 != 0:
         batch_size = batch_size - (batch_size%8)
         print(f"Batch size is reset to {batch_size}, the multiple of 8(number of gpus).")
 
     # Setting up dora args
-    if model_version != "melody":
+    if model_version not in ["melody", "stereo-melody"]:
         solver = "musicgen/musicgen_base_32khz"
-        model_scale = model_version
+        if "stereo" in model_version:
+            model_scale = model_version.rsplit('-')[-1]
+        else:
+            model_scale = model_version
         conditioner = "text2music"
     else:
         solver = "musicgen/musicgen_melody_32khz"
@@ -345,6 +351,11 @@ def train(
     continue_from = f"//pretrained/facebook/musicgen-{model_version}"
 
     args = ["run", "-d", "--", f"solver={solver}", f"model/lm/model_scale={model_scale}", f"continue_from={continue_from}", f"conditioner={conditioner}"]
+    if "stereo" in model_version:
+        args.append(f"codebooks_pattern.delay.delays={[0, 0, 1, 1, 2, 2, 3, 3]}")
+        args.append('transformer_lm.n_q=8')
+        args.append('interleave_stereo_codebooks.use=True')
+        args.append('channels=2')
     args.append(f"datasource.max_sample_rate={max_sample_rate}")
     args.append(f"datasource.train={meta_path}")
     args.append(f"dataset.train.num_samples={len_dataset}")
