@@ -45,7 +45,7 @@ git clone https://github.com/sakemin/cog-musicgen-fine-tuner
 To run the model, you need a local copy of the model's Docker image. You can satisfy this requirement by specifying the image ID in your call to `predict` like:
 
 ```
-cog predict r8.im/sakemin/musicgen-fine-tuner@sha256:da6baec49fe08fb827891cf65b75992926f6343ba3ce6473b5a91bfdbac2cf33 -i prompt="tense staccato strings. plucked strings. dissonant. scary movie." -i duration=8
+cog predict r8.im/sakemin/musicgen-fine-tuner@sha256:e2e532576db5bc5d7fad59467bfe91eea879053e25b2709758e6293ed76bb7a5 -i prompt="tense staccato strings. plucked strings. dissonant. scary movie." -i duration=8
 ```
 
 For more information, see the Cog section [here](https://replicate.com/sakemin/musicgen-fine-tuner/api#run)
@@ -121,7 +121,7 @@ cog train -i dataset_path=@<path-to-your-data> <additional hyperparameters>
 - `one_same_description`: str = Input(description="A description for all audio data", default=None)
 - `"auto_labeling"`: bool = Input(description="Generate labels (genre, mood, theme, etc.) for each track using `essentia-tensorflow` for music information retrieval", default=True)
 - `"drop_vocals"`: bool = Input(description="Remove vocal tracks from audio files using Demucs source separation", default=True)
-- `model_version`: str = Input(description="Model version to train", default="small", choices=["melody", "small", "medium", "large"])
+- `model_version`: str = Input(description="Model version to train", default="stereo-melody", choices=[“melody”, “small”, “medium”, “stereo-melody”, “stereo-small”, “stereo-medium”])
 - `lr`: float = Input(description="Learning rate", default=1)
 - `epochs`: int = Input(description="Number of epochs to train for", default=10)
 - `updates_per_epoch`: int = Input(description="Number of iterations for one epoch", default=100) #If None, iterations per epoch will be set according to dataset/batch size. If a value is provided, the number of iterations per epoch will be set as specified.
@@ -136,7 +136,7 @@ cog train -i dataset_path=@<path-to-your-data> <additional hyperparameters>
 import replicate
 
 training = replicate.trainings.create(
-	version="sakemin/musicgen:da6baec49fe08fb827891cf65b75992926f6343ba3ce6473b5a91bfdbac2cf33",
+	version="sakemin/musicgen:e2e532576db5bc5d7fad59467bfe91eea879053e25b2709758e6293ed76bb7a5",
   input={
     "dataset_path":"https://your/data/path.zip",
     "one_same_description":"description for your dataset music",
