@@ -44,7 +44,9 @@ def prepare_data(
         one_same_description: str = None,
         meta_path: str = 'src/meta',
         auto_labeling: bool = True,
-        drop_vocals: bool = True):
+        drop_vocals: bool = True,
+        device: str = 'cuda',
+        channels: int = 2):
 
     d_path = Path(target_path)
     d_path.mkdir(exist_ok=True, parents=True)
@@ -80,9 +82,9 @@ def prepare_data(
     from pydub import AudioSegment
 
     if drop_vocals:
-        import demucs.api
+        import demucs.pretrained
         import torchaudio
-        separator = demucs.api.Separator(model="mdx_extra")
+        separator = demucs.pretrained.get_model('mdx_extra').to('cuda')
     else:
         separator = None
 
@@ -103,17 +105,33 @@ def prepare_data(
             
             if len(audio)>30000:
                 print('Chunking ' + fname)
-
+    
                 # Splitting the audio files into 30-second chunks
                 for i in range(0, len(audio), 30000):
                     chunk = audio[i:i + 30000]
                     if len(chunk) > 5000: # Omitting residuals with <5sec duration
-                        chunk.export(f"{target_path + '/' + fname[:-4]}_chunk{i//1000}.wav", format="wav")
                         if drop_vocals and separator is not None:
+                            from demucs.apply import apply_model
+                            from demucs.audio import convert_audio
+                            import numpy as np
                             print('Separating Vocals from ' + f"{target_path + '/' + fname[:-4]}_chunk{i//1000}.wav")
-                            origin, separated = separator.separate_audio_file(f"{target_path + '/' + fname[:-4]}_chunk{i//1000}.wav")
-                            mixed = separated["bass"] + separated["drums"] + separated["other"]
-                            torchaudio.save(f"{target_path + '/' + fname[:-4]}_chunk{i//1000}.wav", mixed, separator.samplerate)
+                            
+                            channel_sounds = chunk.split_to_mono()
+                            samples = [s.get_array_of_samples() for s in channel_sounds]
+
+                            chunk = np.array(samples).T.astype(np.float32)
+                            chunk /= np.iinfo(samples[0].typecode).max
+                            chunk = torch.Tensor(chunk).T
+                            print(chunk.shape)
+
+                            # Resample for Demucs
+                            chunk = convert_audio(chunk, 44100, separator.samplerate, separator.audio_channels)
+                            stems = apply_model(separator, chunk[None], device='cuda')
+                            stems = stems[:, [separator.sources.index('bass'), separator.sources.index('drums'), separator.sources.index('other')]]
+                            mixed = stems.sum(1)
+                            torchaudio.save(f"{target_path + '/' + fname[:-4]}_chunk{i//1000}.wav", mixed.squeeze(0), separator.samplerate)
+                        else:
+                            chunk.export(f"{target_path + '/' + fname[:-4]}_chunk{i//1000}.wav", format="wav")
                 os.remove(target_path + '/' + fname)
 
     max_sample_rate = 0
@@ -303,7 +321,7 @@ def train(
         optimizer: str = Input(description="Type of optimizer.", default='dadam', choices=["dadam", "adamw"]),
         lr: float = Input(description="Learning rate", default=1),
         lr_scheduler: str = Input(description="Type of lr_scheduler", default="cosine", choices=["exponential", "cosine", "polynomial_decay", "inverse_sqrt", "linear_warmup"]),
-        warmup: int = Input(description="Warmup of lr_scheduler", default=0),
+        warmup: int = Input(description="Warmup of lr_scheduler", default=8),
         cfg_p: float = Input(description="CFG dropout ratio", default=0.3),
 ) -> TrainingOutput:
     meta_path = 'src/meta'
@@ -314,9 +332,15 @@ def train(
     # Removing previous training's leftover
     if os.path.isfile(out_path):
         os.remove(out_path)
+    if os.path.isfile('weights'):
+        os.remove('weights')
     if os.path.isfile('weight'):
         os.remove('weight')
     import shutil
+    if os.path.isdir('weights'):
+        shutil.rmtree('weights')
+    if os.path.isdir('weight'):
+        shutil.rmtree('weight')
     if os.path.isdir(meta_path):
         shutil.rmtree(meta_path)
     if os.path.isdir(target_path):
@@ -326,7 +350,11 @@ def train(
     if os.path.isdir('tmp'):
         shutil.rmtree('tmp')
 
-    max_sample_rate, len_dataset = prepare_data(dataset_path, target_path, one_same_description, meta_path, auto_labeling, drop_vocals)
+    if "stereo" in model_version:
+        channels = 2
+    else:
+        channels = 1
+    max_sample_rate, len_dataset = prepare_data(dataset_path, target_path, one_same_description, meta_path, auto_labeling, drop_vocals, 'cuda', channels)
 
     if model_version in ["melody", "stereo-melody", "medium", "stereo-medium"]:
         batch_size = 8

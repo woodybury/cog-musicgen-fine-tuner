@@ -4,7 +4,7 @@
 build:
   # set to true if your model requires a GPU
   gpu: true
-  cuda: "11.7"
+  cuda: "12.1"
 
   # a list of ubuntu apt packages to install
   system_packages:
@@ -26,7 +26,8 @@ build:
 
   # a list of packages in the format <package-name>==<version>
   python_packages:
-    - "torch==2.0.1"
+    - "demucs"
+    - "torch==2.1.0"
     - "av"
     - "einops"
     - flashy>=0.0.1
@@ -37,11 +38,11 @@ build:
     - "numpy"
     - "sentencepiece"
     - "spacy==3.5.2"
-    - "torchaudio>=2.0.0"
+    - "torchaudio"
     - "huggingface_hub"
     - "tqdm"
     - "transformers>=4.31.0"
-    - "xformers==0.0.22"
+    - "xformers==0.0.22.post4 --index-url https://download.pytorch.org/whl/cu121"
     - "demucs"
     - "librosa"
     - "gradio"
@@ -56,7 +57,7 @@ build:
 
   # commands run after the environment is setup
   run:
-    - python3 -m pip install -U git+https://github.com/facebookresearch/demucs#egg=demucs
+    # - python3 -m pip install -U git+https://github.com/facebookresearch/demucs#egg=demucs
   
 # predict.py defines how predictions are run on your model
 predict: "predict.py:Predictor"
