@@ -93,8 +93,9 @@ def prepare_data(
             if filename.endswith(('.mp4')):
                 import moviepy 
                 video = moviepy.editor.VideoFileClip(os.path(filename))
-                fname = filename.rsplit('.',1)[0]+'.mp4'
+                fname = filename.rsplit('.',1)[0]+'.wav'
                 video.audio.write_audiofile(os.path.join(target_path, fname))
+                print(f'A mp4 file is converted into a wav file : {filename}')
                 os.remove(target_path + '/' + filename)
             else:
                 fname = filename
@@ -198,7 +199,7 @@ def prepare_data(
 
         os.mkdir(meta_path)
         with open(meta_path + "/data.jsonl", "w") as train_file:
-            files = list(d_path.rglob('*.mp3')) + list(d_path.rglob('*.wav'))
+            files = list(d_path.rglob('*.mp3')) + list(d_path.rglob('*.wav')) +list(d_path.rglob('*.flac'))
             if len(files)==0:
                 raise ValueError("No audio file detected. Are you sure the audio file is longer than 5 seconds?")
             for filename in tqdm(files):
