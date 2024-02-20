@@ -74,18 +74,17 @@ class Predictor(BasePredictor):
         if str(weights) == "weights":
             weights = None
 
+        self.tuned_weights = None
 
-        if weights is not None:
-            # self.my_model = MusicGen.get_pretrained(weights)
-            # self.my_model = self.load_tensorizer(weights, model_version)
-            print("Fine-tuned model weights loaded!")
-            self.model = load_ckpt(weights, self.device)
-        else:
-            self.model = self._load_model(
-                model_path=MODEL_PATH,
-                cls=MusicGen,
-                model_id="facebook/musicgen-stereo-melody",
-            )
+        # if weights is not None:
+        #     print("Fine-tuned model weights loaded!")
+        #     self.model = load_ckpt(weights, self.device)
+        # else:
+        self.model = self._load_model(
+            model_path=MODEL_PATH,
+            cls=MusicGen,
+            model_id="facebook/musicgen-stereo-melody",
+        )
             # self.melody_model = self._load_model(
             #     model_path=MODEL_PATH,
             #     cls=MusicGen,
@@ -242,9 +241,10 @@ class Predictor(BasePredictor):
         # elif model_version == "finetuned":
         #     model = self.my_model
 
-        if replicate_weights:
+        if replicate_weights and replicate_weights != self.tuned_weights:
             self.model = load_ckpt(replicate_weights, self.device)
             print("Fine-tuned model weights hot-swapped!")
+            self.tuned_weights = replicate_weights
 
         if multi_band_diffusion and int(self.model.lm.cfg.transformer_lm.n_q) == 8:
             raise ValueError("Multi-band Diffusion only works with non-stereo models.")
