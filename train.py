@@ -12,7 +12,6 @@ See more info on how to use dora: https://github.com/facebookresearch/dora
 import logging
 import os
 import os.path
-
 import subprocess
 from cog import BaseModel, Input, Path
 import subprocess as sp
@@ -25,9 +24,11 @@ from essentia.standard import (
     TensorflowPredictEffnetDiscogs,
     TensorflowPredict2D,
 )
+
 os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2,3,4,5,6,7'
 
 import torch
+from torch.cuda.amp import autocast, GradScaler
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s", level=logging.INFO, datefmt="%Y-%m-%d %H:%M:%S"
@@ -91,7 +92,7 @@ def prepare_data(
     for filename in tqdm(os.listdir(target_path)):
         if filename.endswith(('.mp3', '.wav', '.flac', '.mp4')):
             if filename.endswith(('.mp4')):
-                import moviepy 
+                import moviepy
                 video = moviepy.editor.VideoFileClip(os.path(filename))
                 fname = filename.rsplit('.',1)[0]+'.wav'
                 video.audio.write_audiofile(os.path.join(target_path, fname))
@@ -103,10 +104,10 @@ def prepare_data(
             audio = AudioSegment.from_file(target_path + '/' + fname)
 
             audio = audio.set_frame_rate(44100) # Resampling to 44100
-            
+
             if len(audio)>30000:
                 print('Chunking ' + fname)
-    
+
                 # Splitting the audio files into 30-second chunks
                 for i in range(0, len(audio), 30000):
                     chunk = audio[i:i + 30000]
@@ -116,7 +117,7 @@ def prepare_data(
                             from demucs.audio import convert_audio
                             import numpy as np
                             print('Separating Vocals from ' + f"{target_path + '/' + fname[:-4]}_chunk{i//1000}.wav")
-                            
+
                             channel_sounds = chunk.split_to_mono()
                             samples = [s.get_array_of_samples() for s in channel_sounds]
 
@@ -258,7 +259,7 @@ def prepare_data(
 
         if len(meta)==0:
             raise ValueError("No audio file detected. Are you sure the audio file is longer than 5 seconds?")
-        
+
         for m in meta:
             if m.sample_rate > max_sample_rate:
                 max_sample_rate = m.sample_rate
@@ -327,29 +328,15 @@ def train(
 ) -> TrainingOutput:
     meta_path = 'src/meta'
     target_path = 'src/train_data'
-
     out_path = "trained_model.tar"
 
     # Removing previous training's leftover
-    if os.path.isfile(out_path):
-        os.remove(out_path)
-    if os.path.isfile('weights'):
-        os.remove('weights')
-    if os.path.isfile('weight'):
-        os.remove('weight')
-    import shutil
-    if os.path.isdir('weights'):
-        shutil.rmtree('weights')
-    if os.path.isdir('weight'):
-        shutil.rmtree('weight')
-    if os.path.isdir(meta_path):
-        shutil.rmtree(meta_path)
-    if os.path.isdir(target_path):
-        shutil.rmtree(target_path)
-    if os.path.isdir('models'):
-        shutil.rmtree('models')
-    if os.path.isdir('tmp'):
-        shutil.rmtree('tmp')
+    for path in ['weights', 'weight', out_path, meta_path, target_path, 'models', 'tmp']:
+        if os.path.exists(path):
+            if os.path.isdir(path):
+                shutil.rmtree(path)
+            else:
+                os.remove(path)
 
     if "stereo" in model_version:
         channels = 2
@@ -362,7 +349,7 @@ def train(
         print(f"Batch size is reset to {batch_size}, since `medium(melody)` model can only be trained with 8 with current GPU settings.")
 
     if batch_size % 8 != 0:
-        batch_size = batch_size - (batch_size%8)
+        batch_size = batch_size - (batch_size % 8)
         print(f"Batch size is reset to {batch_size}, the multiple of 8(number of gpus).")
 
     # Setting up dora args
@@ -410,7 +397,27 @@ def train(
         args.append("dataset.train.permutation_on_files=True")
         args.append(f"optim.updates_per_epoch={updates_per_epoch}")
 
-    sp.call(["dora"]+args)
+    sp.call(["dora"] + args)
+
+    # Gradient Accumulation and Mixed Precision Training
+    scaler = GradScaler()
+    accumulation_steps = max(1, 16 // batch_size)  # Adjust as needed
+
+    for epoch in range(epochs):
+        for i, batch in enumerate(dataloader):
+            optimizer.zero_grad()
+            with autocast():
+                outputs = model(inputs)
+                loss = criterion(outputs, targets)
+                loss = loss / accumulation_steps  # Normalize the loss
+            scaler.scale(loss).backward()
+
+            if (i + 1) % accumulation_steps == 0:
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad()
+
+            torch.cuda.empty_cache()
 
     for dirpath, dirnames, filenames in os.walk("tmp"):
         for filename in [f for f in filenames if f == "checkpoint.th"]:
