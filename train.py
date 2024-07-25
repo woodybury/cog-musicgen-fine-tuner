@@ -357,7 +357,7 @@ def train(
         channels = 1
     max_sample_rate, len_dataset = prepare_data(dataset_path, target_path, one_same_description, meta_path, auto_labeling, drop_vocals, 'cuda', channels)
 
-    if model_version in ["melody", "stereo-melody", "medium", "stereo-medium"]:
+    if model_version in ["melody", "stereo-melody", "medium", "stereo-medium", "large"]:
         batch_size = 8
         print(f"Batch size is reset to {batch_size}, since `medium(melody)` model can only be trained with 8 with current GPU settings.")
 
